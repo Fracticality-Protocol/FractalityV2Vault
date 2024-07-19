@@ -1,66 +1,10 @@
-## Foundry
+# Fractality V2 Vault
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
 
-Foundry consists of:
+## Differences from technical SPEC
 
--   **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
--   **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
--   **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
--   **Chisel**: Fast, utilitarian, and verbose solidity REPL.
-
-## Documentation
-
-https://book.getfoundry.sh/
-
-## Usage
-
-### Build
-
-```shell
-$ forge build
-```
-
-### Test
-
-```shell
-$ forge test
-```
-
-### Format
-
-```shell
-$ forge fmt
-```
-
-### Gas Snapshots
-
-```shell
-$ forge snapshot
-```
-
-### Anvil
-
-```shell
-$ anvil
-```
-
-### Deploy
-
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
-```
-
-### Cast
-
-```shell
-$ cast <subcommand>
-```
-
-### Help
-
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
-```
+- We still had some references to 'withdrawal', when in reality we use redeem. Because of this I changed most references from 'withdrawal' to 'redeem'. For example, withdrawFeeBasisPoints to redeemFeeBasisPoints.
+- Deposit event not in contract, because it already exists in the ERC4626 parent contract.
+- RedeemRequest struct renamed to RedeemRequestData to avoid clash with ERC7540 RedeemRequest event.
+- Withdraw event not in contract, because it already exists in the ERC4626 parent contract. However, take note that the base event contains an owner field, which doesn't make sense in an async withdraw. The controller address will be emitted in place of the owner.
+- Introduced a new error, to check if the redeem fee is between 0 and 10000 basis points (0% to 100%).
