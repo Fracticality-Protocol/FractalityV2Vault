@@ -8,7 +8,7 @@ import "@solmate/tokens/ERC4626.sol";
 
 import "@solmate/tokens/ERC20.sol";
 
-contract FractalityV2Vault is AccessControl, ERC4626 {
+contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
     /*
     ROLES
     */
@@ -56,6 +56,38 @@ contract FractalityV2Vault is AccessControl, ERC4626 {
         uint256 redeemRequestShareAmount;
         uint256 redeemRequestAssetAmount;
         uint256 redeemRequestCreationTime;
+    }
+
+    /// @notice Struct containing parameters for initializing the vault
+    /// @param asset The address of the underlying asset token
+    /// @param vaultSharesName The name of the vault shares token
+    /// @param vaultSharesSymbol The symbol of the vault shares token
+    /// @param strategyAddress The address where the strategy funds will be sent
+    /// @param strategyName The name of the investment strategy
+    /// @param strategyURI A URI that explains the strategy in detail
+    /// @param strategyType The type of strategy address (0: EOA, 1: MULTISIG, 2: SMARTCONTRACT, 3: CEXDEPOSIT)
+    /// @param maxDepositPerTransaction The maximum amount of assets that can be deposited by a user per transaction
+    /// @param minDepositPerTransaction The minimum amount of assets that need to be deposited by a user per transaction
+    /// @param maxVaultCapacity The maximum amount of assets the vault can hold in total
+    /// @param redeemFeeBasisPoints The fee charged on redeems, in basis points, on assets redeemed
+    /// @param claimableDelay The minimum delay between creating a redemption request and when it can be processed
+    /// @param redeemFeeCollector The address where redeem fees are sent on redeems
+    /// @param pnlReporter The address granted the PNL_REPORTER_ROLE
+    struct ConstructorParams {
+        address asset;
+        string vaultSharesName;
+        string vaultSharesSymbol;
+        address strategyAddress;
+        string strategyName;
+        string strategyURI;
+        uint8 strategyType;
+        uint256 maxDepositPerTransaction;
+        uint256 minDepositPerTransaction;
+        uint256 maxVaultCapacity;
+        uint256 redeemFeeBasisPoints;
+        uint256 claimableDelay;
+        address redeemFeeCollector;
+        address pnlReporter;
     }
 
     /*
@@ -125,6 +157,9 @@ contract FractalityV2Vault is AccessControl, ERC4626 {
     /// @dev When true, certain operations in the vault cannot be performed
     /// @dev This is typically used in emergency situations or during maintenance
     bool public halted;
+
+
+    uint16 constant private _maxBasisPoints=10000;
 
     /*
     MAPPINGS
@@ -209,6 +244,10 @@ contract FractalityV2Vault is AccessControl, ERC4626 {
     ERRORS  
     */
 
+    /// @notice Error thrown when an operation is attempted while the vault is halted
+    /// @dev This error is used to prevent certain actions when the vault is in a halted state
+    error Halted();
+
     /// @notice Error thrown when a user tries to use withdraw instead of redeem
     /// @dev Users must use the redeem function for withdrawals in this vault
     error UseRedeem();
@@ -241,6 +280,11 @@ contract FractalityV2Vault is AccessControl, ERC4626 {
     /// @dev The total assets in the vault must not exceed the maximum capacity
     error ExceedsMaxVaultCapacity();
 
+    /// @notice Error thrown when an invalid deposit amount is provided
+    /// @dev This error is used when the deposit amount is outside the allowed range for a deposit transaction
+    /// @param amount The invalid deposit amount that was provided
+    error InvalidDepositAmount(uint256 amount);
+
     /// @notice Generic error thrown when the caller isn't authorized to do an action
     /// @dev This is particularly used for checking operator permissions
     error Unauthorized();
@@ -257,9 +301,9 @@ contract FractalityV2Vault is AccessControl, ERC4626 {
     /// @dev This is a safety check to ensure the correct amount of shares are being redeemed
     error ShareAmountDiscrepancy();
 
-    /// @notice Error thrown when someone tries to do an async deposit, which is not available in this vault
+    /// @notice Error thrown when someone tries to do an operation not available in a vault that does async redeems, such as this one. Deposits are still synchronous.
     /// @dev Async deposits are not supported in this vault implementation
-    error AsyncDepositNotAvailable();
+    error NotAvailableInAsyncRedeemVault();
 
     /// @notice Error thrown when an invalid redeem fee has been attempted to be set
     /// @dev The redeem fee must be between 0 and 10000 basis points (0% to 100%)
@@ -274,79 +318,73 @@ contract FractalityV2Vault is AccessControl, ERC4626 {
     /// @dev It's thrown when calling setHaltStatus() with a value that matches the current halted state
     error HaltStatusUnchanged();
 
+    /// @notice Error thrown when an ERC20 token transfer fails
+    /// @dev This error is used when a transfer or transferFrom operation on the underlying ERC20 asset fails
+    /// @dev It can occur during any operation involving token transfers
+    error ERC20TransferFailed();
+
+    /// @notice Error thrown when reported losses exceed the total assets in the vault
+    /// @dev This error is used to prevent the vault's asset balance from causing an underflow.
+    /// @dev It's thrown in the reportLosses function if the reported loss amount is greater than the current vaultAssets
+    error LossExceedsVaultAssets();
+
+    /*
+    Modifiers
+    */
+    modifier onlyWhenNotHalted() {
+        if (halted) {
+            revert Halted();
+        }
+        _;
+    }
+
     /*
     CONSTRUCTOR AND SETTERS  
     */
-    /// @param _asset The address of the underlying asset token
-    /// @param _vaultSharesName The name of the vault shares token
-    /// @param _vaultSharesSymbol The symbol of the vault shares token
-    /// @param _strategyAddress The address where the strategy funds will be sent
-    /// @param _strategyName The name of the investment strategy
-    /// @param _strategyURI A URI that explains the strategy in detail
-    /// @param _strategyType The type of strategy address (0: EOA, 1: MULTISIG, 2: SMARTCONTRACT, 3: CEXDEPOSIT)
-    /// @param _maxDepositPerTransaction The maximum amount of assets that can be deposited by a user per transaction
-    /// @param _minDepositPerTransaction The minimum amount of assets that need to be deposited by a user per transaction
-    /// @param _maxVaultCapacity The maximum amount of assets the vault can hold in total
-    /// @param _redeemFeeBasisPoints The fee charged on redeems, in basis points, on assets redeemed
-    /// @param _claimableDelay The minimum delay between creating a redemption request and when it can be processed
-    /// @param _redeemFeeCollector The address where redeem fees are sent on redeems
-    /// @param _pnlReporter The address granted the PNL_REPORTER_ROLE
-    constructor(
-        address _asset,
-        string memory _vaultSharesName,
-        string memory _vaultSharesSymbol,
-        address _strategyAddress,
-        string memory _strategyName,
-        string memory _strategyURI,
-        uint8 _strategyType,
-        uint256 _maxDepositPerTransaction,
-        uint256 _minDepositPerTransaction,
-        uint256 _maxVaultCapacity,
-        uint256 _redeemFeeBasisPoints,
-        uint256 _claimableDelay,
-        address _redeemFeeCollector,
-        address _pnlReporter
-    )
-        ERC4626(ERC20(_asset), _vaultSharesName, _vaultSharesSymbol)
+    /// @notice Initializes the vault with the provided parameters
+    /// @dev Sets up the vault's configuration, strategy, and initial roles
+    /// @param params A struct containing all necessary initialization parameters, see ConstructorParams for details
+    constructor(ConstructorParams memory params)
+        ERC4626(ERC20(params.asset), params.vaultSharesName, params.vaultSharesSymbol)
         AccessControl()
     {
         if (
-            _asset == address(0) ||
-            _strategyAddress == address(0) ||
-            _pnlReporter == address(0) ||
-            _redeemFeeCollector == address(0)
+            params.asset == address(0) ||
+            params.strategyAddress == address(0) ||
+            params.pnlReporter == address(0) ||
+            params.redeemFeeCollector == address(0)
         ) {
             revert ZeroAddress();
         }
-        if (_minDepositPerTransaction > _maxDepositPerTransaction) {
+        if (params.minDepositPerTransaction > params.maxDepositPerTransaction) {
             revert InvalidMinDepositPerTransaction();
         }
-        if (_maxVaultCapacity == 0) {
+        if (params.maxVaultCapacity == 0) {
             revert InvalidMaxVaultCapacity();
         }
-        if (_redeemFeeBasisPoints > 10000) {
+        if (params.redeemFeeBasisPoints > _maxBasisPoints) {
             revert InvalidRedeemFee();
         }
-        if (_strategyType > 3) {
+        if (params.strategyType > 3) {
             revert InvalidStrategyType();
         }
 
         strategy = InvestmentStrategy(
-            _strategyAddress,
-            StrategyAddressType(_strategyType),
-            _strategyURI,
-            _strategyName
+            params.strategyAddress,
+            StrategyAddressType(params.strategyType),
+            params.strategyURI,
+            params.strategyName
         );
 
-        maxDepositPerTransaction = _maxDepositPerTransaction;
-        minDepositPerTransaction = _minDepositPerTransaction;
-        maxVaultCapacity = _maxVaultCapacity;
-        redeemFeeBasisPoints = _redeemFeeBasisPoints;
-        claimableDelay = _claimableDelay;
+        maxDepositPerTransaction = params.maxDepositPerTransaction;
+        minDepositPerTransaction = params.minDepositPerTransaction;
+        maxVaultCapacity = params.maxVaultCapacity;
+        redeemFeeBasisPoints = params.redeemFeeBasisPoints;
+        claimableDelay = params.claimableDelay;
 
-        redeemFeeCollector = _redeemFeeCollector;
+        redeemFeeCollector = params.redeemFeeCollector;
         grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        grantRole(PNL_REPORTER_ROLE, _pnlReporter);
+        grantRole(PNL_REPORTER_ROLE, params.pnlReporter);
     }
 
     function setClaimableDelay(
@@ -456,9 +494,9 @@ contract FractalityV2Vault is AccessControl, ERC4626 {
     }
 
     function claimableRedeemRequest(
-         uint /*requestId*/,
-        address controller)
-        public view returns(uint256){
+        uint /*requestId*/,
+        address controller
+    ) public view returns (uint256) {
         RedeemRequestData memory request = redeemRequests[controller];
         if (request.redeemRequestCreationTime == 0) {
             return 0; //No request request exists
@@ -467,18 +505,16 @@ contract FractalityV2Vault is AccessControl, ERC4626 {
         if (
             block.timestamp < request.redeemRequestCreationTime + claimableDelay
         ) {
-
             return 0; //Request is still pending, not claimable
-        }else{
+        } else {
             return _getClaimableShares(request.redeemRequestShareAmount);
         }
-
-
-
     }
 
-    function maxRedeem(address controller) public view override returns (uint256){
-        if(halted){
+    function maxRedeem(
+        address controller
+    ) public view override returns (uint256) {
+        if (halted) {
             return 0; //cannot redeem while halted
         }
         RedeemRequestData memory request = redeemRequests[controller];
@@ -486,7 +522,6 @@ contract FractalityV2Vault is AccessControl, ERC4626 {
         if (request.redeemRequestCreationTime == 0) {
             return 0; //No request request exists
         }
-
 
         if (
             block.timestamp < request.redeemRequestCreationTime + claimableDelay
@@ -497,13 +532,149 @@ contract FractalityV2Vault is AccessControl, ERC4626 {
         return _getClaimableShares(request.redeemRequestShareAmount);
     }
 
-    function _getClaimableShares(uint256 _redeemRequestShareAmount) internal view returns (uint256){
-        uint256 sharesInVault=convertToShares(asset.balanceOf(address(this)));
-        if(sharesInVault<_redeemRequestShareAmount){
-            return 0;//Not enough shares in the vault to cover the request
-        }else{
+    function _getClaimableShares(
+        uint256 _redeemRequestShareAmount
+    ) internal view returns (uint256) {
+        uint256 sharesInVault = convertToShares(asset.balanceOf(address(this)));
+        if (sharesInVault < _redeemRequestShareAmount) {
+            return 0; //Not enough shares in the vault to cover the request
+        } else {
             return _redeemRequestShareAmount;
         }
     }
 
+    /*
+    MAIN OPERATIONAL FUNCTIONS
+    */
+
+    function deposit(
+        uint256 assets,
+        address receiver
+    ) public override onlyWhenNotHalted nonReentrant returns (uint256 shares) {
+        if (
+            assets < minDepositPerTransaction ||
+            assets > maxDepositPerTransaction
+        ) {
+            revert InvalidDepositAmount(assets);
+        }
+        if (assets + vaultAssets > maxVaultCapacity) {
+            revert ExceedsMaxVaultCapacity();
+        }
+        shares = previewDeposit(assets);
+
+        if (shares == 0) {
+            revert ZeroShares();
+        }
+        vaultAssets += assets;
+
+        _mint(receiver,shares);
+
+        if (!asset.transferFrom(msg.sender, strategy.strategyAddress, assets)) {
+            revert ERC20TransferFailed();
+        }
+
+        emit Deposit(msg.sender, receiver, assets, shares);
+    }
+
+    function mint(
+        uint256 shares,
+        address receiver
+    ) public override onlyWhenNotHalted nonReentrant returns (uint256 assets) {
+        assets = previewMint(shares);
+
+        if (
+            assets < minDepositPerTransaction ||
+            assets > maxDepositPerTransaction
+        ) {
+            revert InvalidDepositAmount(assets);
+        }
+        if (assets + vaultAssets > maxVaultCapacity) {
+            revert ExceedsMaxVaultCapacity();
+        }
+        vaultAssets += assets;
+        _mint(receiver,shares);
+
+        if (!asset.transferFrom(msg.sender, strategy.strategyAddress, assets)) {
+            revert ERC20TransferFailed();
+        }
+
+        emit Deposit(msg.sender, receiver, assets, shares);
+    }
+
+    function reportProfits(
+        uint256 assetProfitAmount,
+        string memory infoURI
+    ) external onlyRole(PNL_REPORTER_ROLE) returns (uint256) {
+        if (assetProfitAmount + vaultAssets > maxVaultCapacity) {
+            revert ExceedsMaxVaultCapacity();
+        }
+
+        vaultAssets += assetProfitAmount;
+        totalProfitsReported += assetProfitAmount;
+        emit ProfitReported(assetProfitAmount, infoURI);
+        return totalProfitsReported;
+    }
+
+    function reportLosses(
+        uint256 assetLossAmount,
+        string memory infoURI
+    ) external onlyRole(PNL_REPORTER_ROLE) returns (uint256) {
+
+        if(assetLossAmount > vaultAssets){
+            revert LossExceedsVaultAssets();
+        }
+
+        vaultAssets -= assetLossAmount;
+        totalLossesReported += assetLossAmount;
+        emit LossReported(assetLossAmount, infoURI);
+        return totalLossesReported;
+    }
+
+    /*
+    BOILERPLATE FUNCTIONS FOR ERC7540 AND ERC4626 COMPLIANCE
+    */
+
+    function previewWithdraw(
+        uint256 /*assets*/
+    ) public pure override returns (uint256) {
+        revert NotAvailableInAsyncRedeemVault();
+    }
+
+    function previewRedeem(
+        uint256 /*shares*/
+    ) public pure override returns (uint256) {
+        revert NotAvailableInAsyncRedeemVault();
+    }
+
+    function requestDeposit(uint256 /*shares*/) public pure returns (uint256) {
+        revert NotAvailableInAsyncRedeemVault();
+    }
+
+    function pendingDepositRequest(
+        uint256 /*requestId*/,
+        address /*controller*/
+    ) public pure returns (uint256) {
+        return 0; //Not an async deposit vault
+    }
+
+    function claimableDepositRequest(
+        uint256 /*requestId*/,
+        address /*controller*/
+    ) public pure returns (uint256) {
+        return 0; //Not an async deposit vault
+    }
+
+    function maxWithdraw(
+        address /*owner*/
+    ) public pure override returns (uint256) {
+        return 0; // Withdraws are not supported, only redeems are.
+    }
+
+    function withdraw(
+        uint256 /*assets*/,
+        address /*receiver*/,
+        address /*owner*/
+    ) public pure override returns (uint256) {
+        revert NotAvailableInAsyncRedeemVault();
+    }
 }

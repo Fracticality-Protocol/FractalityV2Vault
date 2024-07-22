@@ -15,3 +15,6 @@
 - For consistency with the above, renamed minDeposit var to minDepositPerTransaction. Along with all references to it.
 - Changed logic on maxDeposit, wasn't 100% correct.
 - The internal function _maxShareRedeem was renamed to _getClaimableShares to better reflect what it does.
+- we had AsyncDepositNotAvailable error thrown during requestDeposit, but it's better to have an error that can be used in other functions like previewWithdraw. This error is now NotAvailableInAsyncRedeemVault. Also replaces UseRedeem.
+- Was missing ExceedsMaxVaultCapacity check in the mint function.
+- New error LossExceedsVaultAssets to add a safety check in report losses.
