@@ -100,15 +100,15 @@ contract FractalityV2Vault is AccessControl, ERC4626 {
     /// @dev Users must wait at least this long after creating a request before it can be processed
     uint256 public claimableDelay;
 
-    /// @notice The minimum amount of assets that can be deposited by a user
+    /// @notice The minimum amount of assets that need to be deposited by a user per deposit transaction
     /// @dev This value sets the lower limit for deposits to prevent dust amounts and prevent truncation errors.
     /// @dev Attempts to deposit less than this amount will be rejected
-    uint256 public minDeposit;
+    uint256 public minDepositPerTransaction;
 
-    /// @notice The maximum amount of assets that can be deposited by a user
+    /// @notice The maximum amount of assets that can be deposited by a user per deposit transaction
     /// @dev This value sets the upper limit for deposits to prevent overflows and prevent truncation errors.
     /// @dev Attempts to deposit more than this amount will be rejected
-    uint256 public maxDeposit;
+    uint256 public maxDepositPerTransaction;
 
     /// @notice The maximum amount of assets that the vault can hold
     /// @dev This value sets the upper limit for the total assets in the vault
@@ -161,13 +161,13 @@ contract FractalityV2Vault is AccessControl, ERC4626 {
     /// @param infoURI The URI containing additional information about the loss report
     event LossReported(uint256 assetLossAmount, string infoURI);
 
-    /// @notice Emitted when the maximum deposit limit is set
-    /// @param newMaxDeposit The new maximum deposit limit in asset terms
-    event MaxDepositSet(uint256 newMaxDeposit);
+    /// @notice Emitted when the maximum deposit limit per transaction is set
+    /// @param newMaxDepositPerTransaction The new maximum deposit limit in asset terms
+    event MaxDepositPerTransactionSet(uint256 newMaxDepositPerTransaction);
 
     /// @notice Emitted when the minimum deposit limit is set
-    /// @param newMinDeposit The new minimum deposit limit in asset terms
-    event MinDepositSet(uint256 newMinDeposit);
+    /// @param newMinDepositPerTransaction The new minimum deposit limit in asset terms
+    event MinDepositSet(uint256 newMinDepositPerTransaction);
 
     /// @notice Emitted when the maximum vault capacity is set
     /// @param newMaxVaultCapacity The new maximum vault capacity in asset terms
@@ -201,6 +201,10 @@ contract FractalityV2Vault is AccessControl, ERC4626 {
     /// @param newRedeemFee The new redeem fee
     event RedeemFeeSet(uint256 newRedeemFee);
 
+    /// @notice Emitted when the claimable delay is set
+    /// @param newClaimableDelay The new claimable delay value in seconds
+    event ClaimableDelaySet(uint256 newClaimableDelay);
+
     /*
     ERRORS  
     */
@@ -221,13 +225,13 @@ contract FractalityV2Vault is AccessControl, ERC4626 {
     /// @dev Addresses must be non-zero
     error ZeroAddress();
 
-    /// @notice Error thrown when an invalid max deposit amount has been attempted to be set
-    /// @dev The maximum deposit amount must be valid according to vault rules
-    error InvalidMaxDeposit();
+    /// @notice Error thrown when an invalid max deposit per transaction amount has been attempted to be set
+    /// @dev The maximum deposit per transaction amount must be valid according to vault rules
+    error InvalidMaxDepositPerTransaction();
 
-    /// @notice Error thrown when an invalid min deposit amount has been attempted to be set
-    /// @dev The minimum deposit amount must be valid according to vault rules
-    error InvalidMinDeposit();
+    /// @notice Error thrown when an invalid min deposit amount per transaction has been attempted to be set
+    /// @dev The minimum deposit per transaction amount must be valid according to vault rules
+    error InvalidMinDepositPerTransaction();
 
     /// @notice Error thrown when an invalid max vault capacity has been attempted to be set
     /// @dev The maximum vault capacity must be valid according to vault rules
@@ -265,18 +269,59 @@ contract FractalityV2Vault is AccessControl, ERC4626 {
     /// @dev The strategy type must be a valid enum value in StrategyAddressType (0 to 3)
     error InvalidStrategyType();
 
+    /// @notice Error thrown when attempting to change the halt status to its current value
+    /// @dev This error is used to prevent unnecessary state changes and gas costs
+    /// @dev It's thrown when calling setHaltStatus() with a value that matches the current halted state
+    error HaltStatusUnchanged();
 
     /*
-    EXTERNAL FUNCTIONS  
+    CONSTRUCTOR AND SETTERS  
     */
-    constructor(address _asset, string memory _vaultSharesName, string memory _vaultSharesSymbol, address _strategyAddress, string memory _strategyName, string memory _strategyURI, uint8 _strategyType, uint256 _maxDeposit, uint256 _minDeposit, uint256 _maxVaultCapacity, uint256 _redeemFeeBasisPoints, uint256 _claimableDelay, address _redeemFeeCollector, address _pnlReporter) ERC4626(ERC20(_asset), _vaultSharesName, _vaultSharesSymbol) AccessControl() {
-        if(_asset==address(0) || _strategyAddress==address(0) || _pnlReporter==address(0) || _redeemFeeCollector==address(0) ){
+    /// @param _asset The address of the underlying asset token
+    /// @param _vaultSharesName The name of the vault shares token
+    /// @param _vaultSharesSymbol The symbol of the vault shares token
+    /// @param _strategyAddress The address where the strategy funds will be sent
+    /// @param _strategyName The name of the investment strategy
+    /// @param _strategyURI A URI that explains the strategy in detail
+    /// @param _strategyType The type of strategy address (0: EOA, 1: MULTISIG, 2: SMARTCONTRACT, 3: CEXDEPOSIT)
+    /// @param _maxDepositPerTransaction The maximum amount of assets that can be deposited by a user per transaction
+    /// @param _minDepositPerTransaction The minimum amount of assets that need to be deposited by a user per transaction
+    /// @param _maxVaultCapacity The maximum amount of assets the vault can hold in total
+    /// @param _redeemFeeBasisPoints The fee charged on redeems, in basis points, on assets redeemed
+    /// @param _claimableDelay The minimum delay between creating a redemption request and when it can be processed
+    /// @param _redeemFeeCollector The address where redeem fees are sent on redeems
+    /// @param _pnlReporter The address granted the PNL_REPORTER_ROLE
+    constructor(
+        address _asset,
+        string memory _vaultSharesName,
+        string memory _vaultSharesSymbol,
+        address _strategyAddress,
+        string memory _strategyName,
+        string memory _strategyURI,
+        uint8 _strategyType,
+        uint256 _maxDepositPerTransaction,
+        uint256 _minDepositPerTransaction,
+        uint256 _maxVaultCapacity,
+        uint256 _redeemFeeBasisPoints,
+        uint256 _claimableDelay,
+        address _redeemFeeCollector,
+        address _pnlReporter
+    )
+        ERC4626(ERC20(_asset), _vaultSharesName, _vaultSharesSymbol)
+        AccessControl()
+    {
+        if (
+            _asset == address(0) ||
+            _strategyAddress == address(0) ||
+            _pnlReporter == address(0) ||
+            _redeemFeeCollector == address(0)
+        ) {
             revert ZeroAddress();
         }
-        if(_minDeposit>_maxDeposit){
-            revert InvalidMinDeposit();
+        if (_minDepositPerTransaction > _maxDepositPerTransaction) {
+            revert InvalidMinDepositPerTransaction();
         }
-        if(_maxVaultCapacity==0){
+        if (_maxVaultCapacity == 0) {
             revert InvalidMaxVaultCapacity();
         }
         if (_redeemFeeBasisPoints > 10000) {
@@ -285,22 +330,180 @@ contract FractalityV2Vault is AccessControl, ERC4626 {
         if (_strategyType > 3) {
             revert InvalidStrategyType();
         }
- 
-        strategy = InvestmentStrategy(_strategyAddress, StrategyAddressType(_strategyType), _strategyURI, _strategyName);
 
-        maxDeposit=_maxDeposit;
-        minDeposit=_minDeposit;
-        maxVaultCapacity=_maxVaultCapacity;
-        redeemFeeBasisPoints=_redeemFeeBasisPoints;
-        claimableDelay=_claimableDelay;
+        strategy = InvestmentStrategy(
+            _strategyAddress,
+            StrategyAddressType(_strategyType),
+            _strategyURI,
+            _strategyName
+        );
 
-        redeemFeeCollector=_redeemFeeCollector;
+        maxDepositPerTransaction = _maxDepositPerTransaction;
+        minDepositPerTransaction = _minDepositPerTransaction;
+        maxVaultCapacity = _maxVaultCapacity;
+        redeemFeeBasisPoints = _redeemFeeBasisPoints;
+        claimableDelay = _claimableDelay;
+
+        redeemFeeCollector = _redeemFeeCollector;
         grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         grantRole(PNL_REPORTER_ROLE, _pnlReporter);
     }
 
-    
+    function setClaimableDelay(
+        uint256 _newClaimableDelay
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        claimableDelay = _newClaimableDelay;
+        emit ClaimableDelaySet(_newClaimableDelay);
+    }
+
+    function setHaltStatus(
+        bool _newHaltStatus
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (halted == _newHaltStatus) {
+            revert HaltStatusUnchanged();
+        }
+        halted = _newHaltStatus;
+        emit HaltStatusChanged(_newHaltStatus);
+    }
+
+    function setMaxDepositPerTransaction(
+        uint256 _newMaxDepositPerTransaction
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (_newMaxDepositPerTransaction < minDepositPerTransaction) {
+            revert InvalidMaxDepositPerTransaction();
+        }
+        maxDepositPerTransaction = _newMaxDepositPerTransaction;
+        emit MaxDepositPerTransactionSet(_newMaxDepositPerTransaction);
+    }
+
+    function setMinDepositPerTransaction(
+        uint256 _newMinDepositPertransaction
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (_newMinDepositPertransaction > maxDepositPerTransaction) {
+            revert InvalidMinDepositPerTransaction();
+        }
+        minDepositPerTransaction = _newMinDepositPertransaction;
+        emit MinDepositSet(_newMinDepositPertransaction);
+    }
+
+    function setMaxVaultCapacity(
+        uint256 _newMaxVaultCapacity
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (_newMaxVaultCapacity < vaultAssets) {
+            revert InvalidMaxVaultCapacity();
+        }
+        maxVaultCapacity = _newMaxVaultCapacity;
+        emit MaxVaultCapacitySet(_newMaxVaultCapacity);
+    }
+
+    function setOperator(address _operator, bool _approved) external {
+        operators[msg.sender][_operator] = _approved;
+        emit OperatorSet(msg.sender, _operator, _approved);
+    }
+
+    function setRedeemFee(
+        uint256 _newRedeemFeeBasisPoints
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        redeemFeeBasisPoints = _newRedeemFeeBasisPoints;
+        emit RedeemFeeSet(_newRedeemFeeBasisPoints);
+    }
+
+    /*
+        GETTERS AND VIEW FUNCTIONS
+    */
+
+    function totalAssets() public view override returns (uint256) {
+        return vaultAssets;
+    }
+
+    function maxDeposit(
+        address /*receiver*/
+    ) public view override returns (uint256) {
+        uint256 remainingCapacity = maxVaultCapacity - vaultAssets;
+        return
+            remainingCapacity < maxDepositPerTransaction
+                ? remainingCapacity
+                : maxDepositPerTransaction;
+    }
+
+    function maxMint(address receiver) public view override returns (uint256) {
+        return convertToShares(maxDeposit(receiver));
+    }
+
+    function isOperator(
+        address account,
+        address operator
+    ) public view returns (bool) {
+        return operators[account][operator];
+    }
+
+    function pendingRedeemRequest(
+        uint /*requestId*/,
+        address controller
+    ) public view returns (uint256) {
+        RedeemRequestData memory request = redeemRequests[controller];
+        if (request.redeemRequestCreationTime == 0) {
+            return 0; //No request request exists
+        }
+
+        if (
+            block.timestamp < request.redeemRequestCreationTime + claimableDelay
+        ) {
+            return request.redeemRequestShareAmount;
+        } else {
+            return 0; //Request is not pending, it is claimable.
+        }
+    }
+
+    function claimableRedeemRequest(
+         uint /*requestId*/,
+        address controller)
+        public view returns(uint256){
+        RedeemRequestData memory request = redeemRequests[controller];
+        if (request.redeemRequestCreationTime == 0) {
+            return 0; //No request request exists
+        }
+
+        if (
+            block.timestamp < request.redeemRequestCreationTime + claimableDelay
+        ) {
+
+            return 0; //Request is still pending, not claimable
+        }else{
+            return _getClaimableShares(request.redeemRequestShareAmount);
+        }
 
 
+
+    }
+
+    function maxRedeem(address controller) public view override returns (uint256){
+        if(halted){
+            return 0; //cannot redeem while halted
+        }
+        RedeemRequestData memory request = redeemRequests[controller];
+
+        if (request.redeemRequestCreationTime == 0) {
+            return 0; //No request request exists
+        }
+
+
+        if (
+            block.timestamp < request.redeemRequestCreationTime + claimableDelay
+        ) {
+            return 0; //Request is still pending, not claimable
+        }
+
+        return _getClaimableShares(request.redeemRequestShareAmount);
+    }
+
+    function _getClaimableShares(uint256 _redeemRequestShareAmount) internal view returns (uint256){
+        uint256 sharesInVault=convertToShares(asset.balanceOf(address(this)));
+        if(sharesInVault<_redeemRequestShareAmount){
+            return 0;//Not enough shares in the vault to cover the request
+        }else{
+            return _redeemRequestShareAmount;
+        }
+    }
 
 }
