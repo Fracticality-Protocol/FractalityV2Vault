@@ -18,3 +18,5 @@
 - we had AsyncDepositNotAvailable error thrown during requestDeposit, but it's better to have an error that can be used in other functions like previewWithdraw. This error is now NotAvailableInAsyncRedeemVault. Also replaces UseRedeem.
 - Was missing ExceedsMaxVaultCapacity check in the mint function.
 - New error LossExceedsVaultAssets to add a safety check in report losses.
+- Added a setter for the redeem fee collector.
+- Storing the original owner of the shares in the request data, so that it can be used in the Withdraw event.
