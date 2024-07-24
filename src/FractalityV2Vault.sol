@@ -253,6 +253,11 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
     /// @param newRedeemFeeCollector The new address of the redeem fee collector
     event RedeemFeeCollectorSet(address newRedeemFeeCollector);
 
+    /// @notice Emitted when assets are rebalanced between the vault and the strategy
+    /// @param assetInflow The amount of assets transferred into the vault
+    /// @param assetOutflow The amount of assets transferred out of the vault to the strategy
+    event AssetsRebalanced(uint256 assetInflow, uint256 assetOutflow);
+
     /*
     ERRORS  
     */
@@ -271,7 +276,7 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
 
     /// @notice Error thrown when an input address is the zero address
     /// @dev Addresses must be non-zero
-    error ZeroAddress(); //TODO: thrown this in more places to validate
+    error ZeroAddress();
 
     /// @notice Error thrown when an invalid max deposit per transaction amount has been attempted to be set
     /// @dev The maximum deposit per transaction amount must be valid according to vault rules
@@ -798,7 +803,27 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
         return netAssetRedeemAmount;
     }
 
-    //TODO: rebalanceAssets
+    function rebalanceAssets(address sourceOfAssets) external nonReentrant onlyRole(DEFAULT_ADMIN_ROLE){
+        if(sourceOfAssets == address(0)){
+            revert ZeroAddress();
+        }
+        uint256 assetVaultBalance=asset.balanceOf(address(this));
+        if(totalAssetsInRedemptionProcess > assetVaultBalance){
+            uint256 inflow = totalAssetsInRedemptionProcess - assetVaultBalance;
+            if(!asset.transferFrom(sourceOfAssets, address(this), inflow)){
+                revert ERC20TransferFailed();
+            }
+            emit AssetsRebalanced(inflow,0);
+        }else if(totalAssetsInRedemptionProcess < assetVaultBalance){
+            uint256 outflow = assetVaultBalance - totalAssetsInRedemptionProcess;
+            if(!asset.transfer(strategy.strategyAddress, outflow)){
+                revert ERC20TransferFailed();
+            }
+            emit AssetsRebalanced(0, outflow);
+        }else{
+            emit AssetsRebalanced(0,0); //Correct amount was already in the vault
+        }
+    }
 
     /*
     BOILERPLATE FUNCTIONS FOR ERC7540 AND ERC4626 COMPLIANCE
