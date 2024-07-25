@@ -41,10 +41,10 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
     /// @param strategyURI A URI that explains the strategy in detail
     /// @param strategyName The name of the strategy
     struct InvestmentStrategy {
-        address strategyAddress;
-        StrategyAddressType strategyAddressType;
-        string strategyURI;
-        string strategyName;
+        address strategyAddress;//256 -> slot
+        StrategyAddressType strategyAddressType;//256 -> slot
+        string strategyURI;//256 -> slot
+        string strategyName;//256 -> slot
     }
 
     /// @notice Struct representing a redemption request
@@ -54,10 +54,10 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
     /// @param redeemRequestCreationTime Timestamp of the redemption request
     /// @param originalSharesOwner The address that originally owned the shares being redeemed
     struct RedeemRequestData {
-        uint256 redeemRequestShareAmount;
-        uint256 redeemRequestAssetAmount;
-        uint256 redeemRequestCreationTime;
-        address originalSharesOwner;
+        uint256 redeemRequestShareAmount;//256 -> slot
+        uint256 redeemRequestAssetAmount;//256 -> slot
+        uint96 redeemRequestCreationTime;//96 
+        address originalSharesOwner;//160 -> slot
     }
 
     /// @notice Struct containing parameters for initializing the vault
@@ -76,20 +76,20 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
     /// @param redeemFeeCollector The address where redeem fees are sent on redeems
     /// @param pnlReporter The address granted the PNL_REPORTER_ROLE
     struct ConstructorParams {
-        address asset;
-        string vaultSharesName;
-        string vaultSharesSymbol;
-        address strategyAddress;
-        string strategyName;
-        string strategyURI;
-        uint8 strategyType;
-        uint256 maxDepositPerTransaction;
-        uint256 minDepositPerTransaction;
-        uint256 maxVaultCapacity;
-        uint256 redeemFeeBasisPoints;
-        uint256 claimableDelay;
-        address redeemFeeCollector;
-        address pnlReporter;
+        address asset;//160
+        uint16 redeemFeeBasisPoints;//16
+        uint32 claimableDelay;//32
+        uint8 strategyType;//8 -> slot
+        address strategyAddress;//160 -> slot
+        address redeemFeeCollector;//160 -> slot
+        address pnlReporter;//160 -> slot
+        uint128 maxDepositPerTransaction;//128
+        uint128 minDepositPerTransaction;//128 -> slot
+        uint256 maxVaultCapacity;//256 -> slot
+        string strategyName;//256 -> slot
+        string strategyURI;//256 -> slot
+        string vaultSharesName;//256 -> slot
+        string vaultSharesSymbol;//256 -> slot
     }
 
     /*
@@ -120,29 +120,17 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
     /// @dev It's important to note that this sum was made with different exchange rates, so it's not safe to convert back to shares using the current exchange rate.
     uint256 public totalAssetsInRedemptionProcess;
 
-    /// @notice The fee charged on redeems, expressed in basis points
-    /// @dev 100 basis points = 1%. For example, a value of 20 represents a 0.2% fee
-    /// @dev This fee is deducted from the assets at the time of redeem
-    uint256 public redeemFeeBasisPoints;
-
-    /// @notice The address where redeem fees are sent
-    /// @dev This address receives the assets collected from the redeem fee
-    address public redeemFeeCollector;
-
-    /// @notice The minimum delay between creating a redemption request and when it can be processed
-    /// @dev This value is in seconds and represents the mandatory waiting period for redemption requests
-    /// @dev Users must wait at least this long after creating a request before it can be processed
-    uint256 public claimableDelay;
+    //Next 2 vars are in one slot.
 
     /// @notice The minimum amount of assets that need to be deposited by a user per deposit transaction
     /// @dev This value sets the lower limit for deposits to prevent dust amounts and prevent truncation errors.
     /// @dev Attempts to deposit less than this amount will be rejected
-    uint256 public minDepositPerTransaction;
+    uint128 public minDepositPerTransaction;
 
     /// @notice The maximum amount of assets that can be deposited by a user per deposit transaction
     /// @dev This value sets the upper limit for deposits to prevent overflows and prevent truncation errors.
     /// @dev Attempts to deposit more than this amount will be rejected
-    uint256 public maxDepositPerTransaction;
+    uint128 public maxDepositPerTransaction;
 
     /// @notice The maximum amount of assets that the vault can hold
     /// @dev This value sets the upper limit for the total assets in the vault
@@ -155,12 +143,31 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
     /// @dev Note: This is an abstract representation as the actual assets are managed by the strategy
     uint256 public vaultAssets;
 
+    //Next 5 vars are in one slot.
+
+    /// @notice The address where redeem fees are sent
+    /// @dev This address receives the assets collected from the redeem fee
+    address public redeemFeeCollector;
+
     /// @notice Indicates whether the vault operations are halted
     /// @dev When true, certain operations in the vault cannot be performed
     /// @dev This is typically used in emergency situations or during maintenance
     bool public halted;
 
+    /// @notice The maximum number of basis points
+    /// @dev This constant represents 100% in basis points (100% = 10000 basis points)
+    /// @dev Used as a denominator in percentage calculations during redeem fee calculation.
     uint16 private constant _maxBasisPoints = 10000;
+
+    /// @notice The fee charged on redeems, expressed in basis points
+    /// @dev 100 basis points = 1%. For example, a value of 20 represents a 0.2% fee
+    /// @dev This fee is deducted from the assets at the time of redeem
+    uint16 public redeemFeeBasisPoints;
+
+    /// @notice The minimum delay between creating a redemption request and when it can be processed
+    /// @dev This value is in seconds and represents the mandatory waiting period for redemption requests
+    /// @dev Users must wait at least this long after creating a request before it can be processed
+    uint32 public claimableDelay;
 
     /*
     MAPPINGS
@@ -235,11 +242,11 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
 
     /// @notice Emitted when the redeem fee is set
     /// @param newRedeemFee The new redeem fee
-    event RedeemFeeSet(uint256 newRedeemFee);
+    event RedeemFeeSet(uint16 newRedeemFee);
 
     /// @notice Emitted when the claimable delay is set
     /// @param newClaimableDelay The new claimable delay value in seconds
-    event ClaimableDelaySet(uint256 newClaimableDelay);
+    event ClaimableDelaySet(uint32 newClaimableDelay);
 
     /// @notice Emitted when the strategy name is updated
     /// @param newStrategyName The new name of the strategy
@@ -419,7 +426,7 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
     }
 
     function setClaimableDelay(
-        uint256 _newClaimableDelay
+        uint32 _newClaimableDelay
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         claimableDelay = _newClaimableDelay;
         emit ClaimableDelaySet(_newClaimableDelay);
@@ -436,7 +443,7 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
     }
 
     function setMaxDepositPerTransaction(
-        uint256 _newMaxDepositPerTransaction
+        uint128 _newMaxDepositPerTransaction
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (_newMaxDepositPerTransaction < minDepositPerTransaction) {
             revert InvalidMaxDepositPerTransaction();
@@ -446,7 +453,7 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
     }
 
     function setMinDepositPerTransaction(
-        uint256 _newMinDepositPertransaction
+        uint128 _newMinDepositPertransaction
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (_newMinDepositPertransaction > maxDepositPerTransaction) {
             revert InvalidMinDepositPerTransaction();
@@ -474,7 +481,7 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
     }
 
     function setRedeemFee(
-        uint256 _newRedeemFeeBasisPoints
+        uint16 _newRedeemFeeBasisPoints
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         redeemFeeBasisPoints = _newRedeemFeeBasisPoints;
         emit RedeemFeeSet(_newRedeemFeeBasisPoints);
@@ -590,6 +597,28 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
         return _getClaimableShares(request.redeemRequestShareAmount);
     }
 
+      function _mintAndDepositCommon(uint256 assets, address receiver,uint256 shares) internal {
+        if (shares == 0) {
+            revert ZeroShares();
+        }
+        if (
+            assets < minDepositPerTransaction ||
+            assets > maxDepositPerTransaction
+        ) {
+            revert InvalidDepositAmount(assets);
+        }
+
+        if (assets + vaultAssets > maxVaultCapacity) {
+            revert ExceedsMaxVaultCapacity();
+        }
+        vaultAssets += assets;
+        _mint(receiver, shares);
+        if (!asset.transferFrom(msg.sender, strategy.strategyAddress, assets)) {
+            revert ERC20TransferFailed();
+        }
+        emit Deposit(msg.sender, receiver, assets, shares);
+    }
+
     function _getClaimableShares(
         uint256 _redeemRequestShareAmount
     ) internal view returns (uint256) {
@@ -615,29 +644,8 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
         uint256 assets,
         address receiver
     ) public override onlyWhenNotHalted nonReentrant returns (uint256 shares) {
-        if (
-            assets < minDepositPerTransaction ||
-            assets > maxDepositPerTransaction
-        ) {
-            revert InvalidDepositAmount(assets);
-        }
-        if (assets + vaultAssets > maxVaultCapacity) {
-            revert ExceedsMaxVaultCapacity();
-        }
         shares = previewDeposit(assets);
-
-        if (shares == 0) {
-            revert ZeroShares();
-        }
-        vaultAssets += assets;
-
-        _mint(receiver, shares);
-
-        if (!asset.transferFrom(msg.sender, strategy.strategyAddress, assets)) {
-            revert ERC20TransferFailed();
-        }
-
-        emit Deposit(msg.sender, receiver, assets, shares);
+        _mintAndDepositCommon(assets, receiver, shares);
     }
 
     function mint(
@@ -645,25 +653,9 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
         address receiver
     ) public override onlyWhenNotHalted nonReentrant returns (uint256 assets) {
         assets = previewMint(shares);
-
-        if (
-            assets < minDepositPerTransaction ||
-            assets > maxDepositPerTransaction
-        ) {
-            revert InvalidDepositAmount(assets);
-        }
-        if (assets + vaultAssets > maxVaultCapacity) {
-            revert ExceedsMaxVaultCapacity();
-        }
-        vaultAssets += assets;
-        _mint(receiver, shares);
-
-        if (!asset.transferFrom(msg.sender, strategy.strategyAddress, assets)) {
-            revert ERC20TransferFailed();
-        }
-
-        emit Deposit(msg.sender, receiver, assets, shares);
+        _mintAndDepositCommon(assets, receiver, shares);
     }
+
 
     function reportProfits(
         uint256 assetProfitAmount,
@@ -720,7 +712,7 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
 
         request.redeemRequestShareAmount = shares;
         request.redeemRequestAssetAmount = assets;
-        request.redeemRequestCreationTime = block.timestamp;
+        request.redeemRequestCreationTime = uint96(block.timestamp);
         request.originalSharesOwner = owner;
 
         totalAssetsInRedemptionProcess += assets;

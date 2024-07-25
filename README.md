@@ -20,3 +20,4 @@
 - New error LossExceedsVaultAssets to add a safety check in report losses.
 - Added a setter for the redeem fee collector.
 - Storing the original owner of the shares in the request data, so that it can be used in the Withdraw event.
+- Added an event for the rebalance function.
