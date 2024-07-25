@@ -1,6 +1,10 @@
 # Fractality V2 Vault
 
 
+## Technical Specification
+
+The design for this vault was written internally at Fractality. Please reach out to the team if you would like to see a copy.
+
 ## Differences from technical SPEC
 
 - We still had some references to 'withdrawal', when in reality we use redeem. Because of this I changed most references from 'withdrawal' to 'redeem'. For example, withdrawFeeBasisPoints to redeemFeeBasisPoints.
@@ -21,3 +25,8 @@
 - Added a setter for the redeem fee collector.
 - Storing the original owner of the shares in the request data, so that it can be used in the Withdraw event.
 - Added an event for the rebalance function.
+
+
+## Todo
+
+- Do inline documentation of the contract and all its funcitons.

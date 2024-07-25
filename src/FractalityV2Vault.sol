@@ -99,8 +99,6 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
     /// @dev This strategy defines where and how all the funds in the vault will be invested
     InvestmentStrategy public strategy;
 
-    //look into struct packing for some of these "loose" vars
-
     /// @notice Total number of shares currently in the redemption process
     /// @dev These shares are no longer in the custody of users but are held by the vault during redemption
     /// @dev This value represents the sum of all shares that have been requested for redemption but not yet processed
@@ -596,49 +594,6 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
         return _getClaimableShares(request.redeemRequestShareAmount);
     }
 
-    function _mintAndDepositCommon(
-        uint256 assets,
-        address receiver,
-        uint256 shares
-    ) internal {
-        if (shares == 0) {
-            revert ZeroShares();
-        }
-        if (
-            assets < minDepositPerTransaction ||
-            assets > maxDepositPerTransaction
-        ) {
-            revert InvalidDepositAmount(assets);
-        }
-
-        if (assets + vaultAssets > maxVaultCapacity) {
-            revert ExceedsMaxVaultCapacity();
-        }
-        vaultAssets += assets;
-        _mint(receiver, shares);
-        if (!asset.transferFrom(msg.sender, strategy.strategyAddress, assets)) {
-            revert ERC20TransferFailed();
-        }
-        emit Deposit(msg.sender, receiver, assets, shares);
-    }
-
-    function _getClaimableShares(
-        uint256 _redeemRequestShareAmount
-    ) internal view returns (uint256) {
-        uint256 sharesInVault = convertToShares(asset.balanceOf(address(this)));
-        if (sharesInVault < _redeemRequestShareAmount) {
-            return 0; //Not enough shares in the vault to cover the request
-        } else {
-            return _redeemRequestShareAmount;
-        }
-    }
-
-    function _calculateWithdrawFee(
-        uint256 _redeemAssetAmount
-    ) internal view returns (uint256) {
-        return (_redeemAssetAmount * redeemFeeBasisPoints) / _MAX_BASIS_POINTS;
-    }
-
     /*
     MAIN OPERATIONAL FUNCTIONS
     */
@@ -820,6 +775,53 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
         } else {
             emit AssetsRebalanced(0, 0); //Correct amount was already in the vault
         }
+    }
+
+    /*
+    INTERNAL FUNCTIONS
+    */
+
+    function _mintAndDepositCommon(
+        uint256 assets,
+        address receiver,
+        uint256 shares
+    ) internal {
+        if (shares == 0) {
+            revert ZeroShares();
+        }
+        if (
+            assets < minDepositPerTransaction ||
+            assets > maxDepositPerTransaction
+        ) {
+            revert InvalidDepositAmount(assets);
+        }
+
+        if (assets + vaultAssets > maxVaultCapacity) {
+            revert ExceedsMaxVaultCapacity();
+        }
+        vaultAssets += assets;
+        _mint(receiver, shares);
+        if (!asset.transferFrom(msg.sender, strategy.strategyAddress, assets)) {
+            revert ERC20TransferFailed();
+        }
+        emit Deposit(msg.sender, receiver, assets, shares);
+    }
+
+    function _getClaimableShares(
+        uint256 _redeemRequestShareAmount
+    ) internal view returns (uint256) {
+        uint256 sharesInVault = convertToShares(asset.balanceOf(address(this)));
+        if (sharesInVault < _redeemRequestShareAmount) {
+            return 0; //Not enough shares in the vault to cover the request
+        } else {
+            return _redeemRequestShareAmount;
+        }
+    }
+
+    function _calculateWithdrawFee(
+        uint256 _redeemAssetAmount
+    ) internal view returns (uint256) {
+        return (_redeemAssetAmount * redeemFeeBasisPoints) / _MAX_BASIS_POINTS;
     }
 
     /*
