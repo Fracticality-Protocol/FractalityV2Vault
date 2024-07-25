@@ -491,13 +491,13 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
     /// @dev This function can only be called by an account with the DEFAULT_ADMIN_ROLE
     /// @param _newMinDepositPerTransaction The new minimum deposit amount per transaction
     function setMinDepositPerTransaction(
-        uint128 _newMinDepositPertransaction
+        uint128 _newMinDepositPerTransaction
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        if (_newMinDepositPertransaction > maxDepositPerTransaction) {
+        if (_newMinDepositPerTransaction > maxDepositPerTransaction) {
             revert InvalidMinDepositPerTransaction();
         }
-        minDepositPerTransaction = _newMinDepositPertransaction;
-        emit MinDepositSet(_newMinDepositPertransaction);
+        minDepositPerTransaction = _newMinDepositPerTransaction;
+        emit MinDepositSet(_newMinDepositPerTransaction);
     }
 
     /// @notice Sets the maximum capacity of assets that the vault can hold
@@ -587,7 +587,7 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
     /// @notice Returns the maximum amount of assets that can be deposited in a single transaction
     /// @dev This function overrides the maxDeposit function from ERC4626
     /// @dev Returns the smaller of the maxDepositPerTransaction and the remaining vault capacity
-    /// @param receiver The address that would receive the minted shares (unused in this implementation)
+    /// @param 0 The address that would receive the minted shares (unused in this implementation)
     /// @return The maximum amount of assets that can be deposited
     function maxDeposit(
         address /*receiver*/
@@ -622,7 +622,7 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
 
     /// @notice Returns the amount of shares in a pending redeem request for a given controller
     /// @dev A redeem request is considered pending if it hasn't reached the claimable delay period
-    /// @param requestId The ID of the redeem request (unused, as we have 1 request per user at a time)
+    /// @param 0 The ID of the redeem request (unused, as we have 1 request per user at a time)
     /// @param controller The address of the request's controller
     /// @return uint256 The amount of shares in the pending redeem request, or 0 if no pending request exists
     function pendingRedeemRequest(
@@ -645,7 +645,7 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
 
     /// @notice Returns the amount of shares in a claimable redeem request for a given controller
     /// @dev A redeem request is considered claimable if it has reached or passed the claimable delay period
-    /// @param requestId The ID of the redeem request (unused, as we have 1 request per user at a time)
+    /// @param 0 The ID of the redeem request (unused, as we have 1 request per user at a time)
     /// @param controller The address of the request's controller
     /// @return uint256 The amount of shares in the claimable redeem request, or 0 if no claimable request exists
     function claimableRedeemRequest(
@@ -992,7 +992,7 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
 
     /**
      * @dev This function always reverts because the withdraw function is not available in this vault. Only redeem functionality is supported.
-     * @param assets The amount of assets that would be withdrawn
+     * @param 0 The amount of assets that would be withdrawn
      * @return This function never returns; it always reverts
      */
     function previewWithdraw(
@@ -1003,7 +1003,7 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
 
     /**
      * @dev This function always reverts because it's not possible to preview a redeem because they are async.
-     * @param shares The amount of shares that would be redeemed (Not used in this implementation)
+     * @param 0 The amount of shares that would be redeemed (Not used in this implementation)
      * @return This function never returns; it always reverts
      */
     function previewRedeem(
@@ -1014,7 +1014,7 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
 
     /**
      * @dev This function always reverts because this implementation does not have async deposits.
-     * @param shares The amount of shares that would be deposited (Not used in this implementation)
+     * @param 0 The amount of shares that would be deposited (Not used in this implementation)
      * @return This function never returns; it always reverts
      */
     function requestDeposit(uint256 /*shares*/) public pure returns (uint256) {
@@ -1023,8 +1023,8 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
 
     /**
      * @dev This function always reverts because this implementation does not have async deposits.
-     * @param requestId The ID of the deposit request (Not used in this implementation)
-     * @param controller The address of the controller (Not used in this implementation)
+     * @param 0 The ID of the deposit request (Not used in this implementation)
+     * @param 1 The address of the controller (Not used in this implementation)
      * @return This function never returns; it always reverts
      */
     function pendingDepositRequest(
@@ -1036,8 +1036,8 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
 
     /**
      * @dev This function always reverts because this implementation does not have async deposits.
-     * @param requestId The ID of the deposit request (Not used in this implementation)
-     * @param controller The address of the controller (Not used in this implementation)
+     * @param 0 The ID of the deposit request (Not used in this implementation)
+     * @param 1 The address of the controller (Not used in this implementation)
      * @return This function never returns; it always reverts
      */
     function claimableDepositRequest(
@@ -1049,7 +1049,7 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
 
     /**
      * @dev Returns the maximum amount of assets that can be withdrawn from the vault for a given owner.
-     * @param owner The address of the account to check the maximum withdrawal for (unused in this implementation)
+     * @param 0 The address of the account to check the maximum withdrawal for (unused in this implementation)
      * @return Always returns 0 because withdraws are not supported in this vault, only redeems are available.
      */
     function maxWithdraw(
@@ -1060,9 +1060,9 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
 
     /**
      * @dev This function always reverts because withdraws are not supported in this vault, only redeems are available.
-     * @param assets The amount of assets to withdraw (unused)
-     * @param receiver The address to receive the withdrawn assets (unused)
-     * @param owner The owner of the assets to withdraw (unused)
+     * @param 0 The amount of assets to withdraw (unused)
+     * @param 1 The address to receive the withdrawn assets (unused)
+     * @param 2 owner The owner of the assets to withdraw (unused)
      * @return This function never returns; it always reverts
      */
     function withdraw(
