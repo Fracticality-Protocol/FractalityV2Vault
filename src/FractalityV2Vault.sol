@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import "@openzeppelin/contracts/access/AccessControl.sol";
+import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 //This reentrancy guard is from the master branch of openzeppelin, that uses transient storage.
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@solmate/tokens/ERC4626.sol";
-
-import "@solmate/tokens/ERC20.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {ERC4626} from "@solmate/tokens/ERC4626.sol";
+import {ERC20} from "@solmate/tokens/ERC20.sol";
 
 contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
     /*
@@ -41,10 +40,10 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
     /// @param strategyURI A URI that explains the strategy in detail
     /// @param strategyName The name of the strategy
     struct InvestmentStrategy {
-        address strategyAddress;//256 -> slot
-        StrategyAddressType strategyAddressType;//256 -> slot
-        string strategyURI;//256 -> slot
-        string strategyName;//256 -> slot
+        address strategyAddress; //256 -> slot
+        StrategyAddressType strategyAddressType; //256 -> slot
+        string strategyURI; //256 -> slot
+        string strategyName; //256 -> slot
     }
 
     /// @notice Struct representing a redemption request
@@ -54,10 +53,10 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
     /// @param redeemRequestCreationTime Timestamp of the redemption request
     /// @param originalSharesOwner The address that originally owned the shares being redeemed
     struct RedeemRequestData {
-        uint256 redeemRequestShareAmount;//256 -> slot
-        uint256 redeemRequestAssetAmount;//256 -> slot
-        uint96 redeemRequestCreationTime;//96 
-        address originalSharesOwner;//160 -> slot
+        uint256 redeemRequestShareAmount; //256 -> slot
+        uint256 redeemRequestAssetAmount; //256 -> slot
+        uint96 redeemRequestCreationTime; //96
+        address originalSharesOwner; //160 -> slot
     }
 
     /// @notice Struct containing parameters for initializing the vault
@@ -76,20 +75,20 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
     /// @param redeemFeeCollector The address where redeem fees are sent on redeems
     /// @param pnlReporter The address granted the PNL_REPORTER_ROLE
     struct ConstructorParams {
-        address asset;//160
-        uint16 redeemFeeBasisPoints;//16
-        uint32 claimableDelay;//32
-        uint8 strategyType;//8 -> slot
-        address strategyAddress;//160 -> slot
-        address redeemFeeCollector;//160 -> slot
-        address pnlReporter;//160 -> slot
-        uint128 maxDepositPerTransaction;//128
-        uint128 minDepositPerTransaction;//128 -> slot
-        uint256 maxVaultCapacity;//256 -> slot
-        string strategyName;//256 -> slot
-        string strategyURI;//256 -> slot
-        string vaultSharesName;//256 -> slot
-        string vaultSharesSymbol;//256 -> slot
+        address asset; //160
+        uint16 redeemFeeBasisPoints; //16
+        uint32 claimableDelay; //32
+        uint8 strategyType; //8 -> slot
+        address strategyAddress; //160 -> slot
+        address redeemFeeCollector; //160 -> slot
+        address pnlReporter; //160 -> slot
+        uint128 maxDepositPerTransaction; //128
+        uint128 minDepositPerTransaction; //128 -> slot
+        uint256 maxVaultCapacity; //256 -> slot
+        string strategyName; //256 -> slot
+        string strategyURI; //256 -> slot
+        string vaultSharesName; //256 -> slot
+        string vaultSharesSymbol; //256 -> slot
     }
 
     /*
@@ -157,7 +156,7 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
     /// @notice The maximum number of basis points
     /// @dev This constant represents 100% in basis points (100% = 10000 basis points)
     /// @dev Used as a denominator in percentage calculations during redeem fee calculation.
-    uint16 private constant _maxBasisPoints = 10000;
+    uint16 private constant _MAX_BASIS_POINTS = 10000;
 
     /// @notice The fee charged on redeems, expressed in basis points
     /// @dev 100 basis points = 1%. For example, a value of 20 represents a 0.2% fee
@@ -400,7 +399,7 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
         if (params.maxVaultCapacity == 0) {
             revert InvalidMaxVaultCapacity();
         }
-        if (params.redeemFeeBasisPoints > _maxBasisPoints) {
+        if (params.redeemFeeBasisPoints > _MAX_BASIS_POINTS) {
             revert InvalidRedeemFee();
         }
         if (params.strategyType > 3) {
@@ -541,7 +540,7 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
     }
 
     function pendingRedeemRequest(
-        uint /*requestId*/,
+        uint256 /*requestId*/,
         address controller
     ) public view returns (uint256) {
         RedeemRequestData memory request = redeemRequests[controller];
@@ -559,7 +558,7 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
     }
 
     function claimableRedeemRequest(
-        uint /*requestId*/,
+        uint256 /*requestId*/,
         address controller
     ) public view returns (uint256) {
         RedeemRequestData memory request = redeemRequests[controller];
@@ -597,7 +596,11 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
         return _getClaimableShares(request.redeemRequestShareAmount);
     }
 
-      function _mintAndDepositCommon(uint256 assets, address receiver,uint256 shares) internal {
+    function _mintAndDepositCommon(
+        uint256 assets,
+        address receiver,
+        uint256 shares
+    ) internal {
         if (shares == 0) {
             revert ZeroShares();
         }
@@ -633,7 +636,7 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
     function _calculateWithdrawFee(
         uint256 _redeemAssetAmount
     ) internal view returns (uint256) {
-        return (_redeemAssetAmount * redeemFeeBasisPoints) / _maxBasisPoints;
+        return (_redeemAssetAmount * redeemFeeBasisPoints) / _MAX_BASIS_POINTS;
     }
 
     /*
@@ -655,7 +658,6 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
         assets = previewMint(shares);
         _mintAndDepositCommon(assets, receiver, shares);
     }
-
 
     function reportProfits(
         uint256 assetProfitAmount,
@@ -795,25 +797,28 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
         return netAssetRedeemAmount;
     }
 
-    function rebalanceAssets(address sourceOfAssets) external nonReentrant onlyRole(DEFAULT_ADMIN_ROLE){
-        if(sourceOfAssets == address(0)){
+    function rebalanceAssets(
+        address sourceOfAssets
+    ) external nonReentrant onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (sourceOfAssets == address(0)) {
             revert ZeroAddress();
         }
-        uint256 assetVaultBalance=asset.balanceOf(address(this));
-        if(totalAssetsInRedemptionProcess > assetVaultBalance){
+        uint256 assetVaultBalance = asset.balanceOf(address(this));
+        if (totalAssetsInRedemptionProcess > assetVaultBalance) {
             uint256 inflow = totalAssetsInRedemptionProcess - assetVaultBalance;
-            if(!asset.transferFrom(sourceOfAssets, address(this), inflow)){
+            if (!asset.transferFrom(sourceOfAssets, address(this), inflow)) {
                 revert ERC20TransferFailed();
             }
-            emit AssetsRebalanced(inflow,0);
-        }else if(totalAssetsInRedemptionProcess < assetVaultBalance){
-            uint256 outflow = assetVaultBalance - totalAssetsInRedemptionProcess;
-            if(!asset.transfer(strategy.strategyAddress, outflow)){
+            emit AssetsRebalanced(inflow, 0);
+        } else if (totalAssetsInRedemptionProcess < assetVaultBalance) {
+            uint256 outflow = assetVaultBalance -
+                totalAssetsInRedemptionProcess;
+            if (!asset.transfer(strategy.strategyAddress, outflow)) {
                 revert ERC20TransferFailed();
             }
             emit AssetsRebalanced(0, outflow);
-        }else{
-            emit AssetsRebalanced(0,0); //Correct amount was already in the vault
+        } else {
+            emit AssetsRebalanced(0, 0); //Correct amount was already in the vault
         }
     }
 
