@@ -447,8 +447,8 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
         claimableDelay = params.claimableDelay;
 
         redeemFeeCollector = params.redeemFeeCollector;
-        grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        grantRole(PNL_REPORTER_ROLE, params.pnlReporter);
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(PNL_REPORTER_ROLE, params.pnlReporter);
     }
 
     /// @notice Sets a new claimable delay for the vault
