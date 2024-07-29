@@ -18,8 +18,8 @@ contract DeployFractalityV2Vault is Script {
         uint8 strategyType = 0; //EOA
 
         address strategyAddress = address(0xfa08ab4bc646cA5bBf2f649d4e0EaDFE0e31Ff2C);
-        address redeemFeeCollector = address(0x8aA997B6A39A98ACF50FC450DeDcd57223F02c67);
-        address pnlReporter = address(0x8aA997B6A39A98ACF50FC450DeDcd57223F02c67);
+        address redeemFeeCollector = vm.addr(deployerPrivateKey);
+        address pnlReporter = vm.addr(deployerPrivateKey);
 
         uint128 maxDepositPerTransaction=1000000 * 1e18; //100,000$
         uint128 minDepositPerTransaction=100 * 1e18; //100$
