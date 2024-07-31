@@ -7,7 +7,7 @@ import {console} from "@forge-std/console.sol";
 
 
 //deploy with forge script script/DeployFractalityV2Vault.s.sol --fork-url sepolia --broadcast
-//verify with forge verify-contract 0x17d2575Ef048476589018411509ae2D3d4098E29 ./src/FractalityV2Vault.sol:FractalityV2Vault --rpc-url sepolia --watch --guess-constructor-args
+//verify with forge verify-contract 0x7adA3253b54851a7dd73fC6F9933eDCf815379b9 ./src/FractalityV2Vault.sol:FractalityV2Vault --rpc-url sepolia --watch --guess-constructor-args
 contract DeployFractalityV2Vault is Script {
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
