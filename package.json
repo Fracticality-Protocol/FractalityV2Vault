@@ -6,7 +6,7 @@
     "lib": "lib"
   },
   "scripts": {
-    "lint": "solhint ./src/FractalityV2Vault.sol"
+    "lint": "solhint --fix  \"./src/FractalityV2Vault.sol\""
   },
   "repository": {
     "type": "git",

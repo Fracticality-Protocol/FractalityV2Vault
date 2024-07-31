@@ -662,7 +662,11 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
         ) {
             return 0; //Request is still pending, not claimable
         } else {
-            return _getClaimableShares(request.redeemRequestShareAmount);
+            return
+                _getClaimableShares(
+                    request.redeemRequestShareAmount,
+                    request.redeemRequestAssetAmount
+                );
         }
     }
 
@@ -689,7 +693,11 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
             return 0; //Request is still pending, not claimable
         }
 
-        return _getClaimableShares(request.redeemRequestShareAmount);
+        return
+            _getClaimableShares(
+                request.redeemRequestShareAmount,
+                request.redeemRequestAssetAmount
+            );
     }
 
     /*
@@ -863,7 +871,8 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
             revert ShareAmountDiscrepancy();
         }
         uint256 claimableShares = _getClaimableShares(
-            request.redeemRequestShareAmount
+            request.redeemRequestShareAmount,
+            request.redeemRequestAssetAmount
         );
         if (
             block.timestamp <
@@ -970,13 +979,13 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
     }
 
     function _getClaimableShares(
-        uint256 _redeemRequestShareAmount
+        uint256 _redeemRequestShareAmount,
+        uint256 _redeemRequestAssetAmount
     ) internal view returns (uint256) {
-        uint256 sharesInVault = convertToShares(asset.balanceOf(address(this)));
-        if (sharesInVault < _redeemRequestShareAmount) {
-            return 0; //Not enough shares in the vault to cover the request
+        if (asset.balanceOf(address(this)) < _redeemRequestAssetAmount) {
+            return 0; //Not enough assets in the vault to cover the request
         } else {
-            return _redeemRequestShareAmount;
+            return _redeemRequestShareAmount; //Can redeem the shares for the requested asset amount
         }
     }
 
