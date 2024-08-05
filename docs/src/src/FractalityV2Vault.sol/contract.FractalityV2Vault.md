@@ -1,5 +1,5 @@
 # FractalityV2Vault
-[Git Source](https://github.com/Fracticality-Protocol/FractalityV2Vault/blob/1e320bedf4395d4850a7e78b1e8bde25036ac40a/src/FractalityV2Vault.sol)
+[Git Source](https://github.com/Fracticality-Protocol/FractalityV2Vault/blob/2a6df5a40c8e9bc55cd5b87bf651db18e00d67c4/src/FractalityV2Vault.sol)
 
 **Inherits:**
 AccessControl, ERC4626, ReentrancyGuard
@@ -849,7 +849,10 @@ function _mintAndDepositCommon(uint256 assets, address receiver, uint256 shares)
 
 
 ```solidity
-function _getClaimableShares(uint256 _redeemRequestShareAmount) internal view returns (uint256);
+function _getClaimableShares(uint256 _redeemRequestShareAmount, uint256 _redeemRequestAssetAmount)
+    internal
+    view
+    returns (uint256);
 ```
 
 ### _calculateWithdrawFee
