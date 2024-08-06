@@ -33,9 +33,6 @@ contract Redeem is Script {
 
         vm.startBroadcast(user1PrivateKey);
 
-        console.log(block.timestamp);
-        console.log(redeemRequestCreationTime + vault.claimableDelay());
-
         //simple redeem with no delegation at all, caller==owner==controller
         vault.redeem(redeemRequestShareAmount, user1Address, user1Address);
 
