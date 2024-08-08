@@ -6,6 +6,7 @@ import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {ERC4626} from "@solmate/tokens/ERC4626.sol";
 import {ERC20} from "@solmate/tokens/ERC20.sol";
+import {SafeTransferLib} from "@solmate/utils/SafeTransferLib.sol";
 /*
  /$$$$$$$$ /$$$$$$$   /$$$$$$   /$$$$$$  /$$$$$$$$ /$$$$$$  /$$       /$$$$$$ /$$$$$$$$ /$$     /$$
 | $$_____/| $$__  $$ /$$__  $$ /$$__  $$|__  $$__//$$__  $$| $$      |_  $$_/|__  $$__/|  $$   /$$/
@@ -32,6 +33,7 @@ import {ERC20} from "@solmate/tokens/ERC20.sol";
 /// @dev Inherits from AccessControl for role-based access control, ERC4626 for tokenized vault functionality, and ReentrancyGuard for protection against reentrancy attacks
 /// @author Jose Herrera <jose@y2k.finance>
 contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
+    using SafeTransferLib for ERC20;
     /*
     ROLES
     */
@@ -76,15 +78,17 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
     /// @param redeemRequestAssetAmount The converted number of assets to be redeemed (exchange rate frozen at request time)
     /// @param redeemRequestCreationTime Timestamp of the redemption request
     /// @param originalSharesOwner The address that originally owned the shares being redeemed
+    /// @param redeemFeeBasisPoints The fee charged to be charged on redeem, in basis points.
     struct RedeemRequestData {
         uint256 redeemRequestShareAmount; //256 -> slot
         uint256 redeemRequestAssetAmount; //256 -> slot
         uint96 redeemRequestCreationTime; //96
         address originalSharesOwner; //160 -> slot
+        uint16 redeemFeeBasisPoints; //16 -> slot
     }
 
     /// @notice Struct containing parameters for initializing the vault
-    /// @param asset The address of the underlying asset token
+    /// @param asset The address of the underlying asset token. Cannot be a rebasing token!
     /// @param vaultSharesName The name of the vault shares token
     /// @param vaultSharesSymbol The symbol of the vault shares token
     /// @param strategyAddress The address where the strategy funds will be sent
@@ -364,15 +368,14 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
     /// @dev It's thrown when calling setHaltStatus() with a value that matches the current halted state
     error HaltStatusUnchanged();
 
-    /// @notice Error thrown when an ERC20 token transfer fails
-    /// @dev This error is used when a transfer or transferFrom operation on the underlying ERC20 asset fails
-    /// @dev It can occur during any operation involving token transfers
-    error ERC20TransferFailed();
-
     /// @notice Error thrown when reported losses exceed the total assets in the vault
     /// @dev This error is used to prevent the vault's asset balance from causing an underflow.
     /// @dev It's thrown in the reportLosses function if the reported loss amount is greater than the current vaultAssets
     error LossExceedsVaultAssets();
+
+    /// @notice Emitted when a redeem request fails due to produce enough assets, specified in the request.
+    /// @dev This event is triggered when the converted asset amount is less than the specified minimum assets out in a redeem request
+    error RequestRedeemMinAssetsFail();
 
     /*
     Modifiers
@@ -592,6 +595,9 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
     function maxDeposit(
         address /*receiver*/
     ) public view override returns (uint256) {
+        if (halted) {
+            return 0; //cannot deposit while halted
+        }
         uint256 remainingCapacity = maxVaultCapacity - vaultAssets;
         return
             remainingCapacity < maxDepositPerTransaction
@@ -802,35 +808,38 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
         nonReentrant
         returns (uint8)
     {
-        if (controller == address(0) || owner == address(0)) {
-            revert ZeroAddress();
+        return _requestRedeem(shares, controller, owner);
+    }
+
+    /**
+     * @notice Requests a redemption of shares with a minimum assets out check
+     * @dev This function can only be called when the contract is not halted
+     * @dev Caller can be any owner of shares, or an approved operator of the owner
+     * @dev It creates a new redemption request or reverts if there's an existing request
+     * @dev The exchange rate between shares and assets is fixed in the request
+     * @dev Reverts if the converted assets are less than the specified minimum
+     * @param shares The number of shares to redeem
+     * @param controller The address that will control this redemption request
+     * @param owner The address that owns the shares to be redeemed
+     * @param minAssetsOut The minimum amount of assets expected from the redemption
+     * @return A uint8 representing the request ID (always 0 in this implementation)
+     */
+    function requestRedeem(
+        uint256 shares,
+        address controller,
+        address owner,
+        uint256 minAssetsOut
+    )
+        external
+        onlyWhenNotHalted
+        operatorCheck(owner)
+        nonReentrant
+        returns (uint8)
+    {
+        if (convertToAssets(shares) < minAssetsOut) {
+            revert RequestRedeemMinAssetsFail();
         }
-        uint256 assets = convertToAssets(shares);
-        if (assets == 0) {
-            revert ZeroAssets();
-        }
-
-        RedeemRequestData storage request = redeemRequests[controller];
-
-        if (request.redeemRequestCreationTime > 0) {
-            revert ExistingRedeemRequest();
-        }
-
-        request.redeemRequestShareAmount = shares;
-        request.redeemRequestAssetAmount = assets;
-        request.redeemRequestCreationTime = uint96(block.timestamp);
-        request.originalSharesOwner = owner;
-
-        totalAssetsInRedemptionProcess += assets;
-        totalSharesInRedemptionProcess += shares;
-
-        if (!transferFrom(owner, address(this), shares)) {
-            revert ERC20TransferFailed();
-        }
-
-        emit RedeemRequest(msg.sender, controller, owner, shares, assets);
-
-        return 0; // Request id, always since we only have 1 request per user at a time.
+        return _requestRedeem(shares, controller, owner);
     }
 
     /**
@@ -892,23 +901,20 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
         //calculat withdraw fee
 
         uint256 withdrawFee = _calculateWithdrawFee(
-            request.redeemRequestAssetAmount
+            request.redeemRequestAssetAmount,
+            request.redeemFeeBasisPoints
         );
         uint256 netAssetRedeemAmount = request.redeemRequestAssetAmount -
             withdrawFee;
 
-        if (
-            !asset.transfer(redeemFeeCollector, withdrawFee) ||
-            !asset.transfer(receiver, netAssetRedeemAmount)
-        ) {
-            revert ERC20TransferFailed();
-        }
+        asset.safeTransfer(redeemFeeCollector, withdrawFee);
+        asset.safeTransfer(receiver, netAssetRedeemAmount);
 
         emit Withdraw(
             msg.sender,
             receiver,
             request.originalSharesOwner,
-            request.redeemRequestAssetAmount,
+            netAssetRedeemAmount,
             shares
         );
 
@@ -932,16 +938,16 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
         uint256 assetVaultBalance = asset.balanceOf(address(this));
         if (totalAssetsInRedemptionProcess > assetVaultBalance) {
             uint256 inflow = totalAssetsInRedemptionProcess - assetVaultBalance;
-            if (!asset.transferFrom(sourceOfAssets, address(this), inflow)) {
-                revert ERC20TransferFailed();
-            }
+
+            asset.safeTransferFrom(sourceOfAssets, address(this), inflow);
+
             emit AssetsRebalanced(inflow, 0);
         } else if (totalAssetsInRedemptionProcess < assetVaultBalance) {
             uint256 outflow = assetVaultBalance -
                 totalAssetsInRedemptionProcess;
-            if (!asset.transfer(strategy.strategyAddress, outflow)) {
-                revert ERC20TransferFailed();
-            }
+
+            asset.safeTransfer(strategy.strategyAddress, outflow);
+
             emit AssetsRebalanced(0, outflow);
         } else {
             emit AssetsRebalanced(0, 0); //Correct amount was already in the vault
@@ -972,9 +978,7 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
         }
         vaultAssets += assets;
         _mint(receiver, shares);
-        if (!asset.transferFrom(msg.sender, strategy.strategyAddress, assets)) {
-            revert ERC20TransferFailed();
-        }
+        asset.safeTransferFrom(msg.sender, strategy.strategyAddress, assets);
         emit Deposit(msg.sender, receiver, assets, shares);
     }
 
@@ -990,9 +994,45 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
     }
 
     function _calculateWithdrawFee(
-        uint256 _redeemAssetAmount
+        uint256 _redeemAssetAmount,
+        uint256 _redeemFeeBasisPoints
     ) internal view returns (uint256) {
-        return (_redeemAssetAmount * redeemFeeBasisPoints) / _MAX_BASIS_POINTS;
+        return (_redeemAssetAmount * _redeemFeeBasisPoints) / _MAX_BASIS_POINTS;
+    }
+
+    function _requestRedeem(
+        uint256 shares,
+        address controller,
+        address owner
+    ) internal returns (uint8) {
+        if (controller == address(0) || owner == address(0)) {
+            revert ZeroAddress();
+        }
+        uint256 assets = convertToAssets(shares);
+        if (assets == 0) {
+            revert ZeroAssets();
+        }
+
+        RedeemRequestData storage request = redeemRequests[controller];
+
+        if (request.redeemRequestCreationTime > 0) {
+            revert ExistingRedeemRequest();
+        }
+
+        request.redeemRequestShareAmount = shares;
+        request.redeemRequestAssetAmount = assets;
+        request.redeemRequestCreationTime = uint96(block.timestamp);
+        request.originalSharesOwner = owner;
+        request.redeemFeeBasisPoints = redeemFeeBasisPoints;
+
+        totalAssetsInRedemptionProcess += assets;
+        totalSharesInRedemptionProcess += shares;
+
+        SafeTransferLib.safeTransferFrom(this, owner, address(this), shares);
+
+        emit RedeemRequest(msg.sender, controller, owner, shares, assets);
+
+        return 0; // Request id, always since we only have 1 request per user at a time.
     }
 
     /*
