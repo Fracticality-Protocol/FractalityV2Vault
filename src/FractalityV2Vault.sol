@@ -382,6 +382,18 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
     /// @dev Turns off one layer of delegation - use operator functionality instead to delegate.
     error ControllerMustBeCaller();
 
+    /// @notice Error thrown when a user attempts to redeem more shares than they own
+    /// @dev This error is not needed, but it gives context to ERC20's error handling.
+    error InsufficientShares();
+
+    /// @notice Error thrown when there are not enough assets in general to fulfill a redemption request
+    /// @dev This error is triggered only in the case of a catastrophic loss of capital in the trading strategy.
+    error InsufficientAssetsInVault();
+
+    /// @notice Error thrown when the caller's asset allowance is insufficient for a transfer
+    /// @dev This error is used to provide more context than the standard ERC20 error
+    error InsufficientAllowance();
+
     /*
     Modifiers
     */
@@ -895,15 +907,13 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
         ) {
             revert NonClaimableRedeemRequest();
         }
-        _burn(address(this), claimableShares);
 
         totalAssetsInRedemptionProcess -= request.redeemRequestAssetAmount;
-        vaultAssets -= request.redeemRequestAssetAmount;
         totalSharesInRedemptionProcess -= request.redeemRequestShareAmount;
 
         delete redeemRequests[controller];
 
-        //calculat withdraw fee
+        //calculate withdraw fee
 
         uint256 withdrawFee = _calculateWithdrawFee(
             request.redeemRequestAssetAmount,
@@ -983,6 +993,12 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
         }
         vaultAssets += assets;
         _mint(receiver, shares);
+
+        //This check is not necessary, but it gives context to ERC20's error handling.
+        if (asset.allowance(msg.sender, address(this)) < assets) {
+            revert InsufficientAllowance();
+        }
+
         asset.safeTransferFrom(msg.sender, strategy.strategyAddress, assets);
         emit Deposit(msg.sender, receiver, assets, shares);
     }
@@ -1001,7 +1017,7 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
     function _calculateWithdrawFee(
         uint256 _redeemAssetAmount,
         uint256 _redeemFeeBasisPoints
-    ) internal view returns (uint256) {
+    ) internal pure returns (uint256) {
         return (_redeemAssetAmount * _redeemFeeBasisPoints) / _MAX_BASIS_POINTS;
     }
 
@@ -1014,13 +1030,20 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
             revert ZeroAddress();
         }
 
-        if(controller != msg.sender){
+        if (controller != msg.sender) {
             revert ControllerMustBeCaller();
         }
-        
+
+        if (balanceOf[owner] < shares) {
+            revert InsufficientShares();
+        }
+
         uint256 assets = convertToAssets(shares);
         if (assets == 0) {
             revert ZeroAssets();
+        }
+        if (assets > vaultAssets) {
+            revert InsufficientAssetsInVault();
         }
 
         RedeemRequestData storage request = redeemRequests[controller];
@@ -1038,7 +1061,11 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
         totalAssetsInRedemptionProcess += assets;
         totalSharesInRedemptionProcess += shares;
 
-        SafeTransferLib.safeTransferFrom(this, owner, address(this), shares);
+        //reduce the vault's investment assets right away.
+        vaultAssets -= assets;
+
+        //burn the owner's shares right away.
+        _burn(owner, shares);
 
         emit RedeemRequest(msg.sender, controller, owner, shares, assets);
 
