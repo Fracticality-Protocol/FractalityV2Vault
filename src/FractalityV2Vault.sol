@@ -377,6 +377,11 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
     /// @dev This event is triggered when the converted asset amount is less than the specified minimum assets out in a redeem request
     error RequestRedeemMinAssetsFail();
 
+    /// @notice Error thrown when the caller is not the controller of a redeem request
+    /// @dev This error is used to ensure that only the caller of the redeem request can process it.
+    /// @dev Turns off one layer of delegation - use operator functionality instead to delegate.
+    error ControllerMustBeCaller();
+
     /*
     Modifiers
     */
@@ -793,7 +798,7 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
      * @dev It creates a new redemption request or reverts if there's an existing request
      * @dev Note that the exchange rate between shares and assets is fixed in the request.
      * @param shares The number of shares to redeem
-     * @param controller The address that will control this redemption request
+     * @param controller The address that will control this redemption request (must be caller)
      * @param owner The address that owns the shares to be redeemed
      * @return A uint8 representing the request ID (always 0 in this implementation)
      */
@@ -819,7 +824,7 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
      * @dev The exchange rate between shares and assets is fixed in the request
      * @dev Reverts if the converted assets are less than the specified minimum
      * @param shares The number of shares to redeem
-     * @param controller The address that will control this redemption request
+     * @param controller The address that will control this redemption request (must be caller)
      * @param owner The address that owns the shares to be redeemed
      * @param minAssetsOut The minimum amount of assets expected from the redemption
      * @return A uint8 representing the request ID (always 0 in this implementation)
@@ -852,7 +857,7 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
      * original requested amount due to this withdrawal fee.
      * @param shares The number of shares to redeem (must match the original request)
      * @param receiver The address that will receive the redeemed assets
-     * @param controller The address that controls this redemption request
+     * @param controller The address that controls this redemption request (must be the original caller of the redeem request)
      * @return The amount of assets transferred to the receiver
      */
     function redeem(
@@ -1005,9 +1010,14 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
         address controller,
         address owner
     ) internal returns (uint8) {
-        if (controller == address(0) || owner == address(0)) {
+        if (owner == address(0)) {
             revert ZeroAddress();
         }
+
+        if(controller != msg.sender){
+            revert ControllerMustBeCaller();
+        }
+        
         uint256 assets = convertToAssets(shares);
         if (assets == 0) {
             revert ZeroAssets();
