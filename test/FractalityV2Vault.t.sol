@@ -423,8 +423,11 @@ contract FractalityV2VaultTest is Test {
         uint256 prevUserShareBalance = vault.balanceOf(user1);
         uint256 prevStrategyAssets = vault.asset().balanceOf(strategyAddress);
 
+        uint256 sharesObtainedPreview = vault.previewDeposit(assetsToDeposit);
         uint256 sharesObtained = vault.deposit(assetsToDeposit, user1);
         vm.stopPrank();
+
+        assertEq(sharesObtained, sharesObtainedPreview);
 
         _checkDepositOrMint(
             user1,
@@ -435,6 +438,39 @@ contract FractalityV2VaultTest is Test {
             prevUserShareBalance,
             prevStrategyAssets
         );
+    }
+
+    function testDeposit_fails_Halted(uint256 assetsToDeposit) public {
+        vm.assume(assetsToDeposit >= minDepositPerTransaction);
+        vm.assume(assetsToDeposit <= maxDepositPerTransaction);
+
+        vm.prank(admin);
+        vault.setHaltStatus(true);
+
+        vm.startPrank(user1);
+        vault.asset().approve(address(vault), assetsToDeposit);
+
+        vm.expectRevert(FractalityV2Vault.Halted.selector);
+        vault.deposit(assetsToDeposit, user1);
+        vm.stopPrank();
+    }
+
+    function testDeposit_fails_InsufficientAllowance(uint256 assetsToDeposit) public {
+        vm.assume(assetsToDeposit >= minDepositPerTransaction);
+        vm.assume(assetsToDeposit <= maxDepositPerTransaction);
+        vm.startPrank(user1);
+
+        (address strategyAddress, , , ) = vault.strategy();
+
+        uint256 prevVaultAssets = vault.vaultAssets();
+        uint256 prevUserShareBalance = vault.balanceOf(user1);
+        uint256 prevStrategyAssets = vault.asset().balanceOf(strategyAddress);
+
+        uint256 sharesObtainedPreview = vault.previewDeposit(assetsToDeposit);
+
+        vm.expectRevert(FractalityV2Vault.InsufficientAllowance.selector);
+        vault.deposit(assetsToDeposit, user1);
+
     }
 
     //Scenario where the vault has been doing very well, and the user is trying to deposit assets so little that they get (truncated)
@@ -573,9 +609,12 @@ contract FractalityV2VaultTest is Test {
         uint256 prevUserShareBalance = vault.balanceOf(user1);
         uint256 prevStrategyAssets = vault.asset().balanceOf(strategyAddress);
 
-        uint256 assetsDeposited = vault.mint(sharesToMint, user1);
-        vm.stopPrank();
+        uint256 assetsDepositedPrview = vault.previewMint(sharesToMint);
 
+        uint256 assetsDeposited = vault.mint(sharesToMint, user1);
+
+        vm.stopPrank();
+        assertEq(assetsDeposited, assetsDepositedPrview);
         _checkDepositOrMint(
             user1,
             assetsDeposited,
@@ -585,6 +624,146 @@ contract FractalityV2VaultTest is Test {
             prevUserShareBalance,
             prevStrategyAssets
         );
+    }
+
+    function testMint_fails_Halted(uint256 sharesToMint) public {
+        vm.assume(vault.previewMint(sharesToMint) >= minDepositPerTransaction);
+        vm.assume(vault.previewMint(sharesToMint) <= maxDepositPerTransaction);
+
+        uint256 assetsToDepositPreview = vault.previewMint(sharesToMint);
+
+        vm.prank(admin);
+        vault.setHaltStatus(true);
+
+        vm.startPrank(user1);
+        vault.asset().approve(address(vault), assetsToDepositPreview);
+
+        vm.expectRevert(FractalityV2Vault.Halted.selector);
+        uint256 assetsDeposited = vault.mint(sharesToMint, user1);
+    }
+
+    function testReportLosses(uint256 assetsToDeposit, uint256 loss) public {
+        vm.assume(loss <= assetsToDeposit);
+        testDeposit(assetsToDeposit);
+
+        uint256 prevVaultAssets = vault.vaultAssets();
+        uint256 prevTotalShares = vault.totalSupply();
+        uint256 prevUserShareBalance = vault.balanceOf(user1);
+
+        vm.prank(pnlReporter);
+        vault.reportLosses(loss, "");
+
+        assertEq(vault.vaultAssets(), prevVaultAssets - loss);
+        assertEq(vault.totalSupply(), prevTotalShares);
+        assertEq(vault.balanceOf(user1), prevUserShareBalance);
+    }
+
+    function testReportLosses_fails_LossExceedsVaultAssets(uint256 assetsToDeposit, uint256 loss) public {
+        vm.assume(loss > assetsToDeposit);
+        testDeposit(assetsToDeposit);
+
+        uint256 prevVaultAssets = vault.vaultAssets();
+        uint256 prevTotalShares = vault.totalSupply();
+        uint256 prevUserShareBalance = vault.balanceOf(user1);
+
+        vm.prank(pnlReporter);
+        vm.expectRevert(FractalityV2Vault.LossExceedsVaultAssets.selector);
+        vault.reportLosses(loss, "");
+
+    }
+
+    function testReportLosses_fails_NotPnlReporter(uint256 assetsToDeposit, uint256 loss) public {
+        vm.assume(loss <= assetsToDeposit);
+        testDeposit(assetsToDeposit);
+
+        uint256 prevVaultAssets = vault.vaultAssets();
+        uint256 prevTotalShares = vault.totalSupply();
+        uint256 prevUserShareBalance = vault.balanceOf(user1);
+
+        vm.expectRevert();
+        vault.reportLosses(loss, "");
+
+    }
+
+    function testReportProfits(uint256 assetsToDeposit, uint256 profit) public {
+        vm.assume(profit <= assetsToDeposit);
+        testDeposit(assetsToDeposit);
+
+        uint256 prevVaultAssets = vault.vaultAssets();
+        uint256 prevTotalShares = vault.totalSupply();
+        uint256 prevUserShareBalance = vault.balanceOf(user1);
+
+        vm.prank(pnlReporter);
+        vault.reportProfits(profit, "");
+
+        assertEq(vault.vaultAssets(), prevVaultAssets + profit);
+        assertEq(vault.totalSupply(), prevTotalShares);
+        assertEq(vault.balanceOf(user1), prevUserShareBalance);
+    }
+
+    function testReportProfits_fails_NotPnlReporter(uint256 assetsToDeposit, uint256 profit) public {
+        vm.assume(profit <= assetsToDeposit);
+        testDeposit(assetsToDeposit);
+
+        uint256 prevVaultAssets = vault.vaultAssets();
+        uint256 prevTotalShares = vault.totalSupply();
+        uint256 prevUserShareBalance = vault.balanceOf(user1);
+
+        vm.expectRevert();
+        vault.reportProfits(profit, "");
+
+    }
+
+    function testReportProfits_fails_ExceedsMaxVaultCapacity(uint256 assetsToDeposit, uint256 profit) public {
+        testDeposit(assetsToDeposit);
+
+        uint256 profits = vault.maxVaultCapacity();
+        uint256 prevVaultAssets = vault.vaultAssets();
+        uint256 prevTotalShares = vault.totalSupply();
+        uint256 prevUserShareBalance = vault.balanceOf(user1);
+
+        vm.prank(pnlReporter);
+        vm.expectRevert(FractalityV2Vault.ExceedsMaxVaultCapacity.selector);
+        vault.reportProfits(profits, "");
+    }
+
+
+    //Boilerplate functions
+
+    function testPreviewWithdraw() public {
+        uint256 assetsToWithdraw = 100;
+        vm.expectRevert(FractalityV2Vault.NotAvailableInAsyncRedeemVault.selector);
+        vault.previewWithdraw(assetsToWithdraw);
+    }
+
+    function testPreviewRedeem() public {
+        uint256 sharesToRedeem = 100;
+        vm.expectRevert(FractalityV2Vault.NotAvailableInAsyncRedeemVault.selector);
+        vault.previewRedeem(sharesToRedeem);
+    }
+
+
+    function testRequestDeposit() public {
+        uint256 assets = 100;
+        vm.expectRevert(FractalityV2Vault.NotAvailableInAsyncRedeemVault.selector);
+        vault.requestDeposit(assets);
+    }
+
+    function testPendingDepositRequest() public {
+        assertEq(vault.pendingDepositRequest(0,user1), 0);
+    }
+
+    function testClaimableDepositRequest() public {
+        assertEq(vault.claimableDepositRequest(0,user1), 0);
+    }
+
+    function testMaxWithdraw() public {
+        assertEq(vault.maxWithdraw(user1), 0);
+    }
+
+    function testWithdraw() public {
+        vm.expectRevert(FractalityV2Vault.NotAvailableInAsyncRedeemVault.selector);
+       vault.withdraw(0,user1,user1);
     }
 
     //Check functions
