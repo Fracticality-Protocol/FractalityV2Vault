@@ -777,6 +777,65 @@ contract FractalityV2VaultTest is Test {
         );
     }
 
+    function testRequestRedeemWithMinAssetsOut(
+        uint256 assetsToDeposit,
+        uint256 sharesToRedeem
+    ) public {
+        testDeposit(assetsToDeposit);
+
+        vm.assume(sharesToRedeem <= vault.balanceOf(user1));
+        uint256 assets = vault.convertToAssets(sharesToRedeem);
+        vm.assume(assets > 0);
+
+        uint256 prevTotalAssetsInRedemptionProcess = vault
+            .totalAssetsInRedemptionProcess();
+        uint256 prevTotalSharesInRedemptionProcess = vault
+            .totalSharesInRedemptionProcess();
+        uint256 prevUserShareBalance = vault.balanceOf(user1);
+        uint256 prevVaultAssets = vault.vaultAssets();
+
+        uint256 minAssetsOut = vault.convertToAssets(sharesToRedeem);
+        vm.startPrank(user1);
+        assertEq(
+            vault.requestRedeem(sharesToRedeem, user1, user1, minAssetsOut),
+            0
+        );
+
+        uint256 reqTime = block.timestamp;
+        vm.stopPrank();
+
+        _checkRedeemRequest(
+            user1,
+            user1,
+            reqTime,
+            sharesToRedeem,
+            vault.convertToAssets(sharesToRedeem),
+            prevTotalAssetsInRedemptionProcess,
+            prevTotalSharesInRedemptionProcess,
+            prevUserShareBalance,
+            prevVaultAssets
+        );
+    }
+
+    function testRequestRedeemWithMinAssetsOut_fails_RequestRedeemMinAssetsFail(
+        uint256 assetsToDeposit,
+        uint256 sharesToRedeem
+    ) public {
+        testDeposit(assetsToDeposit);
+
+        vm.assume(sharesToRedeem <= vault.balanceOf(user1));
+        uint256 assets = vault.convertToAssets(sharesToRedeem);
+        vm.assume(assets > 0);
+
+        uint256 minAssetsOut = vault.convertToAssets(sharesToRedeem);
+        vm.expectRevert(FractalityV2Vault.RequestRedeemMinAssetsFail.selector);
+        vm.startPrank(user1);
+        assertEq(
+            vault.requestRedeem(sharesToRedeem, user1, user1, minAssetsOut + 1),
+            0
+        );
+    }
+
     function testRequestRedeemWithOperator(
         uint256 assetsToDeposit,
         uint256 sharesToRedeem
@@ -1333,7 +1392,124 @@ contract FractalityV2VaultTest is Test {
     }
 
     //test rebalanceAssets
-    //test requestRedeem with min assets out.
+
+    function testRebalanceAssets_inflow(
+        uint256 assetsToDeposit,
+        uint256 sharesToRedeem
+    ) public {
+        testRequestRedeem(assetsToDeposit, sharesToRedeem);
+
+        assertEq(vault.asset().balanceOf(address(vault)), 0);
+
+        uint256 totalAssetsInRedemptionProcess = vault
+            .totalAssetsInRedemptionProcess();
+
+        uint256 assetsToRedeem = vault.convertToAssets(sharesToRedeem);
+
+        assertEq(totalAssetsInRedemptionProcess, assetsToRedeem);
+
+        mockToken.mint(initialUserMintAmount, admin);
+
+        vm.startPrank(admin);
+        mockToken.approve(address(vault), initialUserMintAmount);
+
+        vault.rebalanceAssets(address(admin));
+
+        assertEq(
+            vault.asset().balanceOf(address(vault)),
+            totalAssetsInRedemptionProcess
+        );
+    }
+
+    function testRebalanceAssets_static(
+        uint256 assetsToDeposit,
+        uint256 sharesToRedeem
+    ) public {
+        testRequestRedeem(assetsToDeposit, sharesToRedeem);
+
+        assertEq(vault.asset().balanceOf(address(vault)), 0);
+
+        uint256 totalAssetsInRedemptionProcess = vault
+            .totalAssetsInRedemptionProcess();
+
+        uint256 assetsToRedeem = vault.convertToAssets(sharesToRedeem);
+
+        assertEq(totalAssetsInRedemptionProcess, assetsToRedeem);
+
+        mockToken.mint(assetsToRedeem, address(vault));
+
+        vm.startPrank(admin);
+
+        vault.rebalanceAssets(address(admin));
+
+        assertEq(
+            vault.asset().balanceOf(address(vault)),
+            totalAssetsInRedemptionProcess
+        );
+    }
+
+    function testRebalanceAssets_outflow(
+        uint256 assetsToDeposit,
+        uint256 sharesToRedeem
+    ) public {
+        (address strategyAddress, , , ) = vault.strategy();
+
+        testRequestRedeem(assetsToDeposit, sharesToRedeem);
+
+        assertEq(vault.asset().balanceOf(address(vault)), 0);
+
+        uint256 totalAssetsInRedemptionProcess = vault
+            .totalAssetsInRedemptionProcess();
+
+        uint256 assetsToRedeem = vault.convertToAssets(sharesToRedeem);
+
+        assertEq(totalAssetsInRedemptionProcess, assetsToRedeem);
+
+        mockToken.mint(initialUserMintAmount * 10, address(vault));
+
+        vm.startPrank(admin);
+
+        uint256 strategyAssetAmountPrev = vault.asset().balanceOf(
+            strategyAddress
+        );
+        uint256 outflow = vault.asset().balanceOf(address(vault)) -
+            totalAssetsInRedemptionProcess;
+
+        vault.rebalanceAssets(address(admin));
+
+        assertEq(
+            vault.asset().balanceOf(address(vault)),
+            totalAssetsInRedemptionProcess
+        );
+
+        assertEq(
+            vault.asset().balanceOf(strategyAddress),
+            strategyAssetAmountPrev + outflow
+        );
+    }
+
+    function testRebalanceAssets_fails_zeroAddress(
+        uint256 assetsToDeposit,
+        uint256 sharesToRedeem
+    ) public {
+        testRequestRedeem(assetsToDeposit, sharesToRedeem);
+
+        assertEq(vault.asset().balanceOf(address(vault)), 0);
+
+        uint256 totalAssetsInRedemptionProcess = vault
+            .totalAssetsInRedemptionProcess();
+
+        uint256 assetsToRedeem = vault.convertToAssets(sharesToRedeem);
+
+        assertEq(totalAssetsInRedemptionProcess, assetsToRedeem);
+
+        mockToken.mint(initialUserMintAmount * 10, address(vault));
+
+        vm.startPrank(admin);
+
+        vm.expectRevert(FractalityV2Vault.ZeroAddress.selector);
+        vault.rebalanceAssets(address(0));
+    }
 
     function _checkRedeem(
         address _controller,
