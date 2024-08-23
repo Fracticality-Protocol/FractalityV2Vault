@@ -11,3 +11,12 @@ broadcast
 node_modules/
 
 .vscode/
+
+*.html
+*.png
+*.css
+
+./coverage/*
+
+cmd_line
+lcov.info

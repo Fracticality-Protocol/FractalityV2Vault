@@ -884,6 +884,7 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
         nonReentrant
         returns (uint256)
     {
+        //second check here is unreachable: Caught by operator check. Zero address cannot be an operator.
         if (receiver == address(0) || controller == address(0)) {
             revert ZeroAddress();
         }
@@ -1026,6 +1027,7 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
         address controller,
         address owner
     ) internal returns (uint8) {
+        //Unreachable: caught by operator check. Zero address cannot be an operator.
         if (owner == address(0)) {
             revert ZeroAddress();
         }
@@ -1042,6 +1044,7 @@ contract FractalityV2Vault is AccessControl, ERC4626, ReentrancyGuard {
         if (assets == 0) {
             revert ZeroAssets();
         }
+        //Unreachable: assets are generated via convertToAssets and can never be larger than the vaultAssets.
         if (assets > vaultAssets) {
             revert InsufficientAssetsInVault();
         }
