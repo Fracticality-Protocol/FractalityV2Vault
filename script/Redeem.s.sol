@@ -24,6 +24,8 @@ contract Redeem is Script {
             uint256 redeemRequestShareAmount,
             uint256 redeemRequestAssetAmount,
             uint96 redeemRequestCreationTime,
+            address originalShareOwner,
+            uint16 redeemFeeBasisPoints
 
         ) = vault.redeemRequests(user1Address); //where controller == user
 
