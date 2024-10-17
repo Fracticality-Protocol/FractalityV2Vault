@@ -1,5 +1,5 @@
 # FractalityV2Vault
-[Git Source](https://github.com/Fracticality-Protocol/FractalityV2Vault/blob/2a6df5a40c8e9bc55cd5b87bf651db18e00d67c4/src/FractalityV2Vault.sol)
+[Git Source](https://github.com/Fracticality-Protocol/FractalityV2Vault/blob/9e55a1ef9e72312abf6068d78df1343c9c7eb83b/src/FractalityV2Vault.sol)
 
 **Inherits:**
 AccessControl, ERC4626, ReentrancyGuard
@@ -765,8 +765,47 @@ function requestRedeem(uint256 shares, address controller, address owner)
 |Name|Type|Description|
 |----|----|-----------|
 |`shares`|`uint256`|The number of shares to redeem|
-|`controller`|`address`|The address that will control this redemption request|
+|`controller`|`address`|The address that will control this redemption request (must be caller)|
 |`owner`|`address`|The address that owns the shares to be redeemed|
+
+**Returns**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`<none>`|`uint8`|A uint8 representing the request ID (always 0 in this implementation)|
+
+
+### requestRedeem
+
+Requests a redemption of shares with a minimum assets out check
+
+*This function can only be called when the contract is not halted*
+
+*Caller can be any owner of shares, or an approved operator of the owner*
+
+*It creates a new redemption request or reverts if there's an existing request*
+
+*The exchange rate between shares and assets is fixed in the request*
+
+*Reverts if the converted assets are less than the specified minimum*
+
+
+```solidity
+function requestRedeem(uint256 shares, address controller, address owner, uint256 minAssetsOut)
+    external
+    onlyWhenNotHalted
+    operatorCheck(owner)
+    nonReentrant
+    returns (uint8);
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`shares`|`uint256`|The number of shares to redeem|
+|`controller`|`address`|The address that will control this redemption request (must be caller)|
+|`owner`|`address`|The address that owns the shares to be redeemed|
+|`minAssetsOut`|`uint256`|The minimum amount of assets expected from the redemption|
 
 **Returns**
 
@@ -806,7 +845,7 @@ function redeem(uint256 shares, address receiver, address controller)
 |----|----|-----------|
 |`shares`|`uint256`|The number of shares to redeem (must match the original request)|
 |`receiver`|`address`|The address that will receive the redeemed assets|
-|`controller`|`address`|The address that controls this redemption request|
+|`controller`|`address`|The address that controls this redemption request (must be the original caller of the redeem request)|
 
 **Returns**
 
@@ -859,7 +898,17 @@ function _getClaimableShares(uint256 _redeemRequestShareAmount, uint256 _redeemR
 
 
 ```solidity
-function _calculateWithdrawFee(uint256 _redeemAssetAmount) internal view returns (uint256);
+function _calculateWithdrawFee(uint256 _redeemAssetAmount, uint256 _redeemFeeBasisPoints)
+    internal
+    pure
+    returns (uint256);
+```
+
+### _requestRedeem
+
+
+```solidity
+function _requestRedeem(uint256 shares, address controller, address owner) internal returns (uint8);
 ```
 
 ### previewWithdraw
@@ -1410,18 +1459,6 @@ Error thrown when attempting to change the halt status to its current value
 error HaltStatusUnchanged();
 ```
 
-### ERC20TransferFailed
-Error thrown when an ERC20 token transfer fails
-
-*This error is used when a transfer or transferFrom operation on the underlying ERC20 asset fails*
-
-*It can occur during any operation involving token transfers*
-
-
-```solidity
-error ERC20TransferFailed();
-```
-
 ### LossExceedsVaultAssets
 Error thrown when reported losses exceed the total assets in the vault
 
@@ -1432,6 +1469,58 @@ Error thrown when reported losses exceed the total assets in the vault
 
 ```solidity
 error LossExceedsVaultAssets();
+```
+
+### RequestRedeemMinAssetsFail
+Emitted when a redeem request fails due to produce enough assets, specified in the request.
+
+*This event is triggered when the converted asset amount is less than the specified minimum assets out in a redeem request*
+
+
+```solidity
+error RequestRedeemMinAssetsFail();
+```
+
+### ControllerMustBeCaller
+Error thrown when the caller is not the controller of a redeem request
+
+*This error is used to ensure that only the caller of the redeem request can process it.*
+
+*Turns off one layer of delegation - use operator functionality instead to delegate.*
+
+
+```solidity
+error ControllerMustBeCaller();
+```
+
+### InsufficientShares
+Error thrown when a user attempts to redeem more shares than they own
+
+*This error is not needed, but it gives context to ERC20's error handling.*
+
+
+```solidity
+error InsufficientShares();
+```
+
+### InsufficientAssetsInVault
+Error thrown when there are not enough assets in general to fulfill a redemption request
+
+*This error is triggered only in the case of a catastrophic loss of capital in the trading strategy.*
+
+
+```solidity
+error InsufficientAssetsInVault();
+```
+
+### InsufficientAllowance
+Error thrown when the caller's asset allowance is insufficient for a transfer
+
+*This error is used to provide more context than the standard ERC20 error*
+
+
+```solidity
+error InsufficientAllowance();
 ```
 
 ## Structs
@@ -1471,6 +1560,7 @@ struct RedeemRequestData {
     uint256 redeemRequestAssetAmount;
     uint96 redeemRequestCreationTime;
     address originalSharesOwner;
+    uint16 redeemFeeBasisPoints;
 }
 ```
 
@@ -1482,6 +1572,7 @@ struct RedeemRequestData {
 |`redeemRequestAssetAmount`|`uint256`|The converted number of assets to be redeemed (exchange rate frozen at request time)|
 |`redeemRequestCreationTime`|`uint96`|Timestamp of the redemption request|
 |`originalSharesOwner`|`address`|The address that originally owned the shares being redeemed|
+|`redeemFeeBasisPoints`|`uint16`|The fee charged to be charged on redeem, in basis points.|
 
 ### ConstructorParams
 Struct containing parameters for initializing the vault
@@ -1510,7 +1601,7 @@ struct ConstructorParams {
 
 |Name|Type|Description|
 |----|----|-----------|
-|`asset`|`address`|The address of the underlying asset token|
+|`asset`|`address`|The address of the underlying asset token. Cannot be a rebasing token!|
 |`redeemFeeBasisPoints`|`uint16`|The fee charged on redeems, in basis points, on assets redeemed|
 |`claimableDelay`|`uint32`|The minimum delay between creating a redemption request and when it can be processed|
 |`strategyType`|`uint8`|The type of strategy address (0: EOA, 1: MULTISIG, 2: SMARTCONTRACT, 3: CEXDEPOSIT)|
