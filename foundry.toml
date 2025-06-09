@@ -3,11 +3,16 @@ src = "src"
 out = "out"
 libs = ["lib"]
 gas_reports = ["FractalityV2Vault"]
-
+solc = "0.8.26"
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
 
 [rpc_endpoints]
 sepolia = "https://arb-sepolia.g.alchemy.com/v2/SA1EqG4RW6GcciKBnPtu8n6OJqxy164t"
 berachainTest= "https://bartio.rpc.berachain.com/"
+arbitrum = "https://arb-mainnet.g.alchemy.com/v2/oo7P8s9OYuw1zhGb0d8YFv21GodCRQYH"
+berachain= "https://rpc.berachain.com/"
+hyperliquid= "https://rpc.hyperliquid.xyz/evm"
 
 
+[etherscan]
+berachain = { key = "verifyContract", url = "https://api.routescan.io/v2/network/mainnet/evm/80094/etherscan" }

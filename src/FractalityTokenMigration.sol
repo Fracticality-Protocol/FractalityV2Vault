@@ -23,7 +23,7 @@ contract FractalityTokenMigration is Ownable {
     // maximum number of seconds that can be added to the lock deadline
     uint256 public constant MAX_DEADLINE_EXTENSION_PER_CALL = 30 days;//2592000 seconds
 
-    // time after which users can no longer deposit.
+    // time after which users can no longer migrate tokens.
     uint256 public lockDeadline;
 
     /// @notice Total amount of tokens that have been migrated to the burn address
@@ -70,11 +70,7 @@ contract FractalityTokenMigration is Ownable {
     /// @notice Error thrown when attempting to migrate tokens while migrations are paused
     error MigrationPaused();
 
-    /**
-     * @dev Deploys a timelock instance that is able to hold the token specified, and will only release it to
-     * `beneficiary_` when {release} is invoked after `releaseTime_`. The release time is specified as a Unix timestamp
-     * (in seconds).
-     */
+    /// @dev Deploys this contract, which allows users to migrate 'burn' their tokens before the deadline, so they can be migrated to the new chain.
     constructor(
         ERC20 token_,
         uint256 lockDeadline_
